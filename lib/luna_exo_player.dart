@@ -198,6 +198,7 @@ class LunaExoPlayer implements Player {
       c = VideoPlayerController.file(
         File(filePath),
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        viewType: VideoViewType.platformView,
       );
     } else {
       c = VideoPlayerController.networkUrl(
@@ -205,6 +206,7 @@ class LunaExoPlayer implements Player {
         formatHint: formatHint,
         httpHeaders: headers,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        viewType: VideoViewType.platformView,
       );
     }
 
@@ -232,6 +234,7 @@ class LunaExoPlayer implements Player {
           formatHint: alternateFormat,
           httpHeaders: retryHeaders,
           videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          viewType: VideoViewType.platformView,
         );
         try {
           await c.initialize();

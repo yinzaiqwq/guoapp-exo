@@ -556,6 +556,7 @@ class TelevisionSettingsDialog extends StatelessWidget {
     this.preloadStatus = '',
     this.enhancement,
     this.onCompareEnhancement,
+    this.onNativePlayer,
   });
   final double speed;
   final int quality;
@@ -571,6 +572,9 @@ class TelevisionSettingsDialog extends StatelessWidget {
   final String preloadStatus;
   final VideoEnhancementController? enhancement;
   final VoidCallback? onCompareEnhancement;
+
+  /// 用系统原生播放器（SurfaceView 直通）播放当前集。
+  final Future<void> Function()? onNativePlayer;
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -673,6 +677,18 @@ class TelevisionSettingsDialog extends StatelessWidget {
             const SizedBox(height: 8),
             Text(preloadStatus, style: const TextStyle(fontSize: 14)),
             const SizedBox(height: 20),
+            if (onNativePlayer != null) ...[
+              RemoteButton(
+                key: const ValueKey('tv-native-player'),
+                label: '用系统播放器播放',
+                icon: Icons.smart_display_rounded,
+                onPressed: () {
+                  Navigator.pop(context);
+                  unawaited(onNativePlayer!());
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
             RemoteButton(
               label: favorite ? '取消追剧' : '加入追剧',
               icon: favorite

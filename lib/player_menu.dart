@@ -32,6 +32,7 @@ class PlayerMenu extends StatefulWidget {
     this.preloadStatus = '',
     this.enhancement,
     this.onCompareEnhancement,
+    this.onNativePlayer,
   });
 
   final PlayerMenuSection section;
@@ -49,6 +50,9 @@ class PlayerMenu extends StatefulWidget {
   final String preloadStatus;
   final VideoEnhancementController? enhancement;
   final VoidCallback? onCompareEnhancement;
+
+  /// 用系统原生播放器（SurfaceView 直通）播放当前集。
+  final Future<void> Function()? onNativePlayer;
   final ValueChanged<int> onEpisode;
   final Future<void> Function(PlaybackPreferences) onPreferences;
   final Future<void> Function() onFavorite;
@@ -294,6 +298,15 @@ class _PlayerMenuState extends State<PlayerMenu> {
                   ),
           ),
           const SizedBox(height: 8),
+          if (widget.onNativePlayer != null && !widget.local)
+            OutlinedButton.icon(
+              key: const ValueKey('player-native-player'),
+              onPressed: _busy ? null : () => _run(widget.onNativePlayer!),
+              icon: const Icon(Icons.smart_display_rounded),
+              label: const Text('用系统播放器播放'),
+            ),
+          if (widget.onNativePlayer != null && !widget.local)
+            const SizedBox(height: 8),
           OutlinedButton.icon(
             key: const ValueKey('player-favorite'),
             onPressed: _busy ? null : () => _run(widget.onFavorite),
