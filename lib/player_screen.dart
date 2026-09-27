@@ -362,7 +362,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_closed &&
         (widget.store.profileEpoch != _profileEpoch ||
             widget.store.locked ||
-            !widget.store.allowsSource('hongguo'))) {
+            !widget.store.allowsSource(widget.detail.drama.source) ||
+            !_supportsDanmaku)) {
       _danmaku.setPlan(null);
     }
   }
@@ -704,7 +705,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           _openedIndex == _index &&
           widget.store.profileEpoch == _profileEpoch &&
           !widget.store.locked &&
-          widget.store.allowsSource('hongguo'),
+          _supportsDanmaku,
       discontinuity: discontinuity,
     );
   }
@@ -1792,7 +1793,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ),
               if (_loading && !hideOverlayForPictureInPicture)
                 ColoredBox(
-                  color: Colors.black.withValues(alpha: .78),
+                  // 完全不透明：切集时旧画面（或已 seek 到 0 的冻结帧）
+                  // 不应透出，否则会与"正在准备播放"的提示并存，观感错乱
+                  color: Colors.black,
                   child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

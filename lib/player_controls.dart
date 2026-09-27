@@ -448,7 +448,7 @@ class _PlayerControlsState extends State<PlayerControls> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (mobile)
-            _mobileControlRow(fullscreen: fullscreen)
+            _mobileControlRow()
           else
             _desktopControlRow(
               fullscreen: fullscreen,
@@ -810,7 +810,7 @@ class _PlayerControlsState extends State<PlayerControls> {
     );
   }
 
-  Widget _mobileControlRow({required bool fullscreen}) {
+  Widget _mobileControlRow() {
     final tools = [
       _toolText(
         key: const ValueKey('player-speed'),
@@ -828,13 +828,12 @@ class _PlayerControlsState extends State<PlayerControls> {
       ),
       if (widget.onPush != null)
         _lanPushTool(const ValueKey('fullscreen-lan-push')),
-      if (fullscreen)
-        _toolIcon(
-          key: const ValueKey('player-episodes'),
-          tooltip: '选集',
-          icon: Icons.grid_view_rounded,
-          onPressed: widget.enabled ? () => _panel(widget.onEpisodes) : null,
-        ),
+      _toolIcon(
+        key: const ValueKey('player-episodes'),
+        tooltip: '选集',
+        icon: Icons.grid_view_rounded,
+        onPressed: widget.enabled ? () => _panel(widget.onEpisodes) : null,
+      ),
       if (widget.onPictureInPicture != null)
         _toolIcon(
           key: const ValueKey('player-picture-in-picture'),
