@@ -998,10 +998,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         if (platform is NativePlayer) {
           if (Platform.isAndroid) {
             if (_television) {
-              await platform.setProperty('hwdec', 'mediacodec');
+              await platform.setProperty('hwdec', 'mediacodec,mediacodec-copy,auto-safe');
               await platform.setProperty('hwdec-codecs', 'all');
-              await platform.setProperty('opengl-pbo', 'yes');
-              await platform.setProperty('video-latency-hacks', 'yes');
               await platform.setProperty('scale', 'bilinear');
               await platform.setProperty('cscale', 'bilinear');
               await platform.setProperty('dscale', 'bilinear');
