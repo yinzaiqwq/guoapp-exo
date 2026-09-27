@@ -1117,6 +1117,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///
   /// 电视/投影仪上 GPU 较弱时，Flutter 的纹理合成是瓶颈；原生 SurfaceView
   /// 由显示控制器直接合成，可显著降低 GPU 占用。
+  /// 支持弹幕的站源：红果走官方弹幕接口，红果TV 走自建服务。
+  bool get _supportsDanmaku {
+    final source = widget.detail.drama.source;
+    return source == 'hongguo' || source == 'hongguotv';
+  }
+
   /// 加密内容或本地播放时不提供系统播放器入口。
   bool get _canUseNativePlayer =>
       _plan != null &&
@@ -1348,7 +1354,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               mobile: _mobile,
               onEpisode: (index) => Navigator.pop(menuContext, index),
               onPreferences: _setPreferences,
-              showDanmaku: widget.detail.drama.source == 'hongguo',
+              showDanmaku: _supportsDanmaku,
               danmakuStatus: _danmaku.status,
               onRetryDanmaku: _danmaku.canRetry ? _danmaku.retry : null,
               preloadStatus: _preloader.status,
@@ -1449,7 +1455,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               onFavorite: _toggleFavorite,
               autoAdvance: _autoAdvance,
               danmaku: _danmakuEnabled,
-              showDanmaku: widget.detail.drama.source == 'hongguo',
+              showDanmaku: _supportsDanmaku,
               danmakuStatus: _danmaku.status,
               onRetryDanmaku: _danmaku.canRetry ? _danmaku.retry : null,
               preload: _preloadEnabled,
@@ -1723,7 +1729,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             onSeek: _seekTo,
             speed: _speed,
             qualityLabel: _qualityLabel,
-            showDanmaku: widget.detail.drama.source == 'hongguo',
+            showDanmaku: _supportsDanmaku,
             danmakuEnabled: _danmakuEnabled,
             danmakuStatus: _danmaku.status,
             onEpisodes: () => _openPanel(PlayerMenuSection.episodes),

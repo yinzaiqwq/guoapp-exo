@@ -264,7 +264,10 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	transport.MaxIdleConnsPerHost = 8
-	transport.ResponseHeaderTimeout = 20 * time.Second
+	// 响应头超时需覆盖服务端同步转码耗时：红果TV 等自建源冷启动实测 20s+，
+	// 原值 20s 会在转码完成前掐断（下载必然失败，播放首次亦失败）。
+	// 媒体传输本就另有不活动检测兜底，此处放宽到 5 分钟。
+	transport.ResponseHeaderTimeout = 5 * time.Minute
 	transport.Proxy = router.proxy
 	cdn := newCDNTransport(transport, newDNSResolver(transport))
 	d.client = &http.Client{Transport: newHuangguoBrowserTransport(cdn, d), Timeout: 45 * time.Second,
@@ -803,6 +806,10 @@ func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput
 	choice := nativePlaybackChoices(media, input.Quality)
 	if series, video, valid := hongguoPlaybackIDs(task); valid {
 		choice.danmakuSeries, choice.danmakuVideo = series, video
+		choice.danmakuSource = sourceHongguo
+	} else if series, video, valid := hongguotvPlaybackIDs(task); valid {
+		choice.danmakuSeries, choice.danmakuVideo = series, video
+		choice.danmakuSource = sourceHongguotv
 	}
 	return engine.nativeOpenPlayback(ctx, choice)
 }

@@ -17,6 +17,14 @@ import (
 	"time"
 )
 
+const (
+	// downloadFirstByteTimeout 首个数据块到达前的等待上限。
+	// 需覆盖服务端同步转码耗时（红果TV 冷启动实测 20s+，并发排队时更久）。
+	downloadFirstByteTimeout = 5 * time.Minute
+	// downloadInactivityTimeout 传输过程中的不活动上限。
+	downloadInactivityTimeout = 30 * time.Second
+)
+
 type nativeDownloadAsset struct {
 	address string
 	name    string
@@ -179,8 +187,11 @@ func (manager *nativeDownloads) downloadFileAttempt(ctx context.Context, address
 	}
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	inactivity := time.AfterFunc(30*time.Second, cancel)
-	defer inactivity.Stop()
+	// 首字节等待窗口需覆盖服务端转码耗时：红果TV 等源自建服务为同步转码
+	// （ffmpeg 串行执行，冷启动实测 20s+），若沿用 30s 会在转码完成前
+	// 就被判超时。收到首个数据块后收紧为常规不活动检测。
+	firstByte := time.AfterFunc(downloadFirstByteTimeout, cancel)
+	defer firstByte.Stop()
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, address, nil)
 	if err != nil {
 		return 0, false, err
@@ -260,7 +271,7 @@ func (manager *nativeDownloads) downloadFileAttempt(ctx context.Context, address
 				err = errors.New("写入下载文件失败，请检查剩余空间")
 				break
 			}
-			inactivity.Reset(30 * time.Second)
+			firstByte.Reset(downloadInactivityTimeout)
 			progress(received, total)
 		}
 		if readErr != nil {

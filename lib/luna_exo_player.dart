@@ -125,18 +125,16 @@ class LunaExoPlayer implements Player {
     final myGen = ++_openGeneration;
     _positionPollTimer?.cancel();
 
-    // 切换新节目时，旧控制器先静音/暂停，彻底防止新旧双重音频重叠
+    // 切集时旧控制器继续播放，直到新集初始化完成再原子切换。
+    // 若此处提前 pause，旧画面会冻结在最后一帧，而新集初始化完成即出声，
+    // 造成「画面是上一集、声音是下一集」。红果TV 等服务端转码的源
+    // 初始化耗时较长，该窗口尤其明显。
     final old = _controller;
-    if (old != null) {
-      if (_valueListener != null) {
-        try {
-          old.removeListener(_valueListener!);
-        } catch (_) {}
-        _valueListener = null;
-      }
+    if (old != null && _valueListener != null) {
       try {
-        await old.pause();
+        old.removeListener(_valueListener!);
       } catch (_) {}
+      _valueListener = null;
     }
 
     state = state.copyWith(completed: false);
@@ -270,6 +268,10 @@ class LunaExoPlayer implements Player {
     }
 
     if (old != null) {
+      // 先暂停再释放：确保旧集声音立即停止，避免与新集重叠
+      try {
+        await old.pause();
+      } catch (_) {}
       try {
         await old.dispose();
       } catch (_) {}

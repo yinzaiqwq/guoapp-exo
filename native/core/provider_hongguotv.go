@@ -248,3 +248,81 @@ func (d *Downloader) resolveHongguotvMedia(ctx context.Context, task Task) (prov
 func (d *Downloader) searchHongguotv(ctx context.Context, page int, query string) ([]Drama, bool, error) {
 	return d.fetchHongguotvCatalogPage(ctx, page, "", query)
 }
+
+// ───────────────────────── 弹幕 ─────────────────────────
+
+// hongguotvDanmakuPage 对应自建服务 /danmaku 的返回。
+type hongguotvDanmakuResponse struct {
+	Items []struct {
+		T     float64 `json:"t"`
+		Text  string  `json:"text"`
+		Color string  `json:"color"`
+		Src   string  `json:"src"`
+	} `json:"items"`
+}
+
+// hongguotvPlaybackIDs 从播放任务解析出弹幕所需的 series_id 与 vid。
+// 红果TV 的 chapter.PageURL 存放 vid（见 fetchHongguotvDetail）。
+func hongguotvPlaybackIDs(task Task) (seriesID, videoID string, ok bool) {
+	source, seriesID, valid := splitProviderDramaID(task.DramaID)
+	if !valid || source != sourceHongguotv {
+		return "", "", false
+	}
+	videoID = strings.TrimSpace(task.Chapter.PageURL)
+	if _, id, ok2 := splitProviderDramaID(videoID); ok2 {
+		videoID = id
+	}
+	if !hongguoNumericID.MatchString(seriesID) || !hongguoNumericID.MatchString(videoID) {
+		return "", "", false
+	}
+	return seriesID, videoID, true
+}
+
+// hongguotvDanmaku 取弹幕。自建服务已聚合红果官方弹幕与本地弹幕。
+func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID string, start, duration int64) (hongguoDanmakuPage, error) {
+	if err := ctx.Err(); err != nil {
+		return hongguoDanmakuPage{}, err
+	}
+	if !hongguoNumericID.MatchString(seriesID) || !hongguoNumericID.MatchString(videoID) {
+		return hongguoDanmakuPage{}, errors.New("弹幕请求参数无效")
+	}
+	// 服务端按集返回整集弹幕，start/duration 仅用于本地过滤
+	values := url.Values{}
+	values.Set("series_id", seriesID)
+	values.Set("vid", videoID)
+	values.Set("ep", strconv.FormatInt(start/danmakuSegmentMS+1, 10))
+	body, err := d.hongguotvRequest(ctx, "/danmaku", values)
+	if err != nil {
+		return hongguoDanmakuPage{}, err
+	}
+	var payload hongguotvDanmakuResponse
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return hongguoDanmakuPage{}, fmt.Errorf("弹幕返回格式异常: %w", err)
+	}
+	page := hongguoDanmakuPage{EpisodeID: videoID, StartMS: start, NextMS: start + duration, Total: int64(len(payload.Items))}
+	seen := map[string]bool{}
+	for index, item := range payload.Items {
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			continue
+		}
+		timeMS := int64(item.T * 1000)
+		if timeMS < start || timeMS >= start+duration {
+			continue
+		}
+		id := fmt.Sprintf("%s-%d-%d", videoID, timeMS, index)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		page.Items = append(page.Items, hongguoDanmakuItem{
+			ID:     id,
+			Text:   truncate(text, 200),
+			TimeMS: timeMS,
+		})
+	}
+	return page, nil
+}
+
+// danmakuSegmentMS 单次弹幕请求覆盖的时长；服务端按集返回，此处用整集区间。
+const danmakuSegmentMS = 24 * 60 * 60 * 1000
