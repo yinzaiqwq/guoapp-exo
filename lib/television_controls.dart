@@ -350,6 +350,7 @@ class _TelevisionControlsState extends State<TelevisionControls> {
                                       ? (position / duration).clamp(0, 1)
                                       : 0,
                                   minHeight: 5,
+                                  color: const Color(0xFFFF765F),
                                   backgroundColor: Colors.transparent,
                                 ),
                               ],

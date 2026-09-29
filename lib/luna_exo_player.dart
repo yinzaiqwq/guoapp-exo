@@ -541,7 +541,9 @@ class LunaExoVideoView extends StatelessWidget {
               Center(
                 child: AspectRatio(
                   aspectRatio: ratio,
-                  child: VideoPlayer(c),
+                  child: ClipRect(
+                    child: VideoPlayer(c),
+                  ),
                 ),
               )
             else

@@ -182,15 +182,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     widget.store.addListener(_accessChanged);
     _player =
         widget.playerFactory?.call() ??
-        (Platform.isAndroid
-            ? LunaExoPlayer()
-            : Player(
-                configuration: const PlayerConfiguration(
-                  bufferSize: 32 * 1024 * 1024,
-                  logLevel: MPVLogLevel.error,
-                ),
-              ));
-    _video = widget.videoBuilder == null && !Platform.isAndroid
+        Player(
+          configuration: PlayerConfiguration(
+            bufferSize: Platform.isAndroid ? 16 * 1024 * 1024 : 32 * 1024 * 1024,
+            logLevel: MPVLogLevel.error,
+          ),
+        );
+    _video = widget.videoBuilder == null && _player is! LunaExoPlayer
         ? VideoController(
             _player,
             configuration: VideoControllerConfiguration(
@@ -1733,12 +1731,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                   fit: BoxFit.contain,
                   controls: (_) => layeredControls,
                 )
-              else
+              else if (_video != null)
                 Video(
                   controller: _video!,
                   fit: BoxFit.contain,
                   controls: (_) => layeredControls,
-                ),
+                )
+              else
+                const ColoredBox(color: Colors.black),
               if (_loading && !hideOverlayForPictureInPicture)
                 ColoredBox(
                   color: Colors.black.withValues(alpha: .78),
