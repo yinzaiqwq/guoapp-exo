@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 
 export 'app_build.dart';
 
-const appVersion = '0.2.64';
+const appVersion = '0.2.65';
 
 ThemeData televisionTheme(ThemeData theme) {
   final colors = theme.colorScheme;
@@ -26,6 +26,10 @@ ThemeData televisionTheme(ThemeData theme) {
   );
   return theme.copyWith(
     focusColor: colors.primaryContainer,
+    progressIndicatorTheme: const ProgressIndicatorThemeData(
+      color: Color(0xFFFF765F),
+      linearTrackColor: Colors.white24,
+    ),
     iconButtonTheme: IconButtonThemeData(
       style: button.copyWith(backgroundColor: focusBackground),
     ),
