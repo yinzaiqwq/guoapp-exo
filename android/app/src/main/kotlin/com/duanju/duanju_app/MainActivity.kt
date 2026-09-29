@@ -30,6 +30,8 @@ class MainActivity : FlutterActivity() {
     private var thermalHeadroom: Double? = null
     private var deviceChannel: MethodChannel? = null
     private var televisionMode = false
+    private var nativePlayerResult: MethodChannel.Result? = null
+    private val nativePlayerRequest = 0x4E50
 
     @Suppress("DEPRECATION")
     private fun isTelevisionDevice(): Boolean {
@@ -109,6 +111,28 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         if (televisionMode) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    }
+
+    @Deprecated("原生播放器结果回传，仅使用 requestCode 区分")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != nativePlayerRequest) return
+        val pending = nativePlayerResult ?: return
+        nativePlayerResult = null
+        when (resultCode) {
+            RESULT_OK -> pending.success(
+                mapOf(
+                    "positionMs" to (data?.getLongExtra(NativePlayerActivity.RESULT_POSITION_MS, 0L) ?: 0L),
+                    "completed" to (data?.getBooleanExtra(NativePlayerActivity.RESULT_COMPLETED, false) ?: false),
+                )
+            )
+            RESULT_FIRST_USER -> pending.error(
+                "playback_failed",
+                data?.getStringExtra("error") ?: "原生播放器失败",
+                null
+            )
+            else -> pending.success(null)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -202,6 +226,26 @@ class MainActivity : FlutterActivity() {
                             lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
                             window.attributes = lp
                             result.success(true)
+                        }
+                        "openNativePlayer" -> {
+                            val url = call.argument<String>("url")
+                            val title = call.argument<String>("title") ?: "播放"
+                            val referer = call.argument<String>("referer")
+                            val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
+                            if (url.isNullOrEmpty()) {
+                                result.error("invalid_url", "播放地址为空", null)
+                            } else if (nativePlayerResult != null) {
+                                result.error("busy", "已有原生播放器在运行", null)
+                            } else {
+                                nativePlayerResult = result
+                                val intent = Intent(this, NativePlayerActivity::class.java).apply {
+                                    putExtra(NativePlayerActivity.EXTRA_URL, url)
+                                    putExtra(NativePlayerActivity.EXTRA_TITLE, title)
+                                    putExtra(NativePlayerActivity.EXTRA_REFERER, referer)
+                                    putExtra(NativePlayerActivity.EXTRA_POSITION_MS, positionMs)
+                                }
+                                startActivityForResult(intent, nativePlayerRequest)
+                            }
                         }
                         "openExternalPlayer" -> {
                             val url = call.argument<String>("url")

@@ -12,6 +12,7 @@ import (
 type nativePlaybackChoice struct {
 	danmakuSeries string
 	danmakuVideo  string
+	danmakuSource string
 	media         []providerMedia
 	index         int
 	qualities     []int

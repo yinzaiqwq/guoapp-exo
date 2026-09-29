@@ -26,6 +26,10 @@ ThemeData televisionTheme(ThemeData theme) {
   );
   return theme.copyWith(
     focusColor: colors.primaryContainer,
+    progressIndicatorTheme: const ProgressIndicatorThemeData(
+      color: Color(0xFFFF765F),
+      linearTrackColor: Colors.white24,
+    ),
     iconButtonTheme: IconButtonThemeData(
       style: button.copyWith(backgroundColor: focusBackground),
     ),
@@ -100,6 +104,47 @@ class AppDevice {
       await channel.invokeMethod('resetBrightness');
     } catch (_) {}
   }
+
+  /// 用原生 ExoPlayer Activity 全屏播放（SurfaceView 直通，不走 Flutter 合成）。
+  ///
+  /// 返回播放结束时的进度；用户中途返回时 [NativePlaybackResult.completed] 为 false。
+  /// 失败（含原生播放器解码错误）会抛 [NativePlaybackFailure]。
+  static Future<NativePlaybackResult> openNativePlayer({
+    required String url,
+    String title = '播放',
+    String referer = '',
+    Duration position = Duration.zero,
+  }) async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      throw const NativePlaybackFailure('原生播放器仅支持 Android');
+    }
+    final dynamic data = await channel.invokeMethod<dynamic>('openNativePlayer', {
+      'url': url,
+      'title': title,
+      'referer': referer,
+      'positionMs': position.inMilliseconds,
+    });
+    if (data is Map) {
+      return NativePlaybackResult(
+        position: Duration(milliseconds: (data['positionMs'] as num?)?.toInt() ?? 0),
+        completed: data['completed'] == true,
+      );
+    }
+    return const NativePlaybackResult(position: Duration.zero, completed: false);
+  }
+}
+
+class NativePlaybackResult {
+  const NativePlaybackResult({required this.position, required this.completed});
+  final Duration position;
+  final bool completed;
+}
+
+class NativePlaybackFailure implements Exception {
+  const NativePlaybackFailure(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }
 
 class AppLayout extends InheritedWidget {

@@ -360,7 +360,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_closed &&
         (widget.store.profileEpoch != _profileEpoch ||
             widget.store.locked ||
-            !widget.store.allowsSource('hongguo'))) {
+            !widget.store.allowsSource(widget.detail.drama.source) ||
+            !_supportsDanmaku)) {
       _danmaku.setPlan(null);
     }
   }
@@ -702,7 +703,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           _openedIndex == _index &&
           widget.store.profileEpoch == _profileEpoch &&
           !widget.store.locked &&
-          widget.store.allowsSource('hongguo'),
+          _supportsDanmaku,
       discontinuity: discontinuity,
     );
   }
@@ -1111,6 +1112,55 @@ class _PlayerScreenState extends State<PlayerScreen>
     await _retry();
   }
 
+  /// 交给系统原生 ExoPlayer（SurfaceView 直通）播放当前集。
+  ///
+  /// 电视/投影仪上 GPU 较弱时，Flutter 的纹理合成是瓶颈；原生 SurfaceView
+  /// 由显示控制器直接合成，可显著降低 GPU 占用。
+  /// 支持弹幕的站源：红果走官方弹幕接口，红果TV 走自建服务。
+  bool get _supportsDanmaku {
+    final source = widget.detail.drama.source;
+    return source == 'hongguo' || source == 'hongguotv';
+  }
+
+  /// 加密内容或本地播放时不提供系统播放器入口。
+  bool get _canUseNativePlayer =>
+      _plan != null &&
+      _plan!.url.isNotEmpty &&
+      _plan!.decryptionKey.isEmpty &&
+      _plan!.local != true &&
+      Platform.isAndroid;
+
+  Future<void> _openNativePlayer() async {
+    final plan = _plan;
+    if (plan == null || plan.url.isEmpty) {
+      throw AppFailure('当前没有可播放的地址，请先等待解析完成');
+    }
+    if (plan.decryptionKey.isNotEmpty) {
+      throw AppFailure('当前内容需要应用内解密，暂不支持系统播放器');
+    }
+    final seconds = _currentPosition;
+    _player.pause();
+    final result = await AppDevice.openNativePlayer(
+      url: plan.url,
+      title: widget.detail.drama.title,
+      referer: plan.headers['Referer'] ?? plan.headers['referer'] ?? '',
+      position: Duration(milliseconds: (seconds * 1000).round()),
+    );
+    if (!mounted || _closed) return;
+    // 回来后按原生播放器的进度续播
+    if (result.position > Duration.zero) {
+      await _seekTo(result.position);
+    }
+    if (result.completed && _preferences.autoAdvance) {
+      final next = _index + 1;
+      if (next < widget.detail.episodes.length) {
+        await _play(next, playWhenReady: true);
+      }
+    } else {
+      _player.play();
+    }
+  }
+
   Future<void> _retry({int? quality}) async {
     final position = _currentPosition;
     if (quality != null) {
@@ -1303,7 +1353,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               mobile: _mobile,
               onEpisode: (index) => Navigator.pop(menuContext, index),
               onPreferences: _setPreferences,
-              showDanmaku: widget.detail.drama.source == 'hongguo',
+              showDanmaku: _supportsDanmaku,
               danmakuStatus: _danmaku.status,
               onRetryDanmaku: _danmaku.canRetry ? _danmaku.retry : null,
               preloadStatus: _preloader.status,
@@ -1314,6 +1364,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               },
               onFavorite: () =>
                   widget.store.toggleFavorite(widget.detail.drama),
+              onNativePlayer: _canUseNativePlayer ? _openNativePlayer : null,
             ),
           ),
         ),
@@ -1403,7 +1454,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               onFavorite: _toggleFavorite,
               autoAdvance: _autoAdvance,
               danmaku: _danmakuEnabled,
-              showDanmaku: widget.detail.drama.source == 'hongguo',
+              showDanmaku: _supportsDanmaku,
               danmakuStatus: _danmaku.status,
               onRetryDanmaku: _danmaku.canRetry ? _danmaku.retry : null,
               preload: _preloadEnabled,
@@ -1413,6 +1464,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                 unawaited(_enhancement.toggleCompare());
                 Navigator.pop(menuContext);
               },
+              onNativePlayer: _canUseNativePlayer ? _openNativePlayer : null,
             ),
           ),
         ),
@@ -1676,7 +1728,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             onSeek: _seekTo,
             speed: _speed,
             qualityLabel: _qualityLabel,
-            showDanmaku: widget.detail.drama.source == 'hongguo',
+            showDanmaku: _supportsDanmaku,
             danmakuEnabled: _danmakuEnabled,
             danmakuStatus: _danmaku.status,
             onEpisodes: () => _openPanel(PlayerMenuSection.episodes),
@@ -1741,7 +1793,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                 const ColoredBox(color: Colors.black),
               if (_loading && !hideOverlayForPictureInPicture)
                 ColoredBox(
-                  color: Colors.black.withValues(alpha: .78),
+                  // 完全不透明：切集时旧画面（或已 seek 到 0 的冻结帧）
+                  // 不应透出，否则会与"正在准备播放"的提示并存，观感错乱
+                  color: Colors.black,
                   child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
