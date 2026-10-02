@@ -525,6 +525,22 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 		for _, drama := range entry.Dramas {
 			result.Items = append(result.Items, nativeNormalize(drama))
 		}
+		// 聚合自建红果TV漫剧库：弥补红果官方网页搜索未收录 AI 漫剧的缺陷
+		if tvItems, _, tvErr := d.fetchHongguotvCatalogPage(ctx, 1, "", query); tvErr == nil && len(tvItems) > 0 {
+			seenIDs := make(map[string]bool, len(result.Items))
+			for _, item := range result.Items {
+				seenIDs[item.ID] = true
+			}
+			var tvDramas []nativeDrama
+			for _, drama := range tvItems {
+				norm := nativeNormalize(drama)
+				if !seenIDs[norm.ID] {
+					seenIDs[norm.ID] = true
+					tvDramas = append(tvDramas, norm)
+				}
+			}
+			result.Items = append(tvDramas, result.Items...)
+		}
 		result.Warning, result.Page = entry.Warning, 1
 		if entry.Limited && result.Warning == "" {
 			result.Warning = "已显示当前可获取的匹配结果，使用更完整的剧名可继续查找"
