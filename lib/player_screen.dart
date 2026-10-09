@@ -1122,10 +1122,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     return source == 'hongguo' || source == 'hongguotv';
   }
 
-  /// 本地播放不提供系统播放器入口；加密内容由原生侧逐样本解密后播放。
+  /// 加密内容或本地播放时不提供系统播放器入口。
+  ///
+  /// 加密内容由内置 media_kit 播放：实测原生 ExoPlayer 路径在电视上比
+  /// media_kit 直通更易卡顿（0.2.66+79 回归），因此不作为默认。
+  /// NativePlayerActivity 中的 CENC 解密能力保留，未从此入口启用。
   bool get _canUseNativePlayer =>
       _plan != null &&
       _plan!.url.isNotEmpty &&
+      _plan!.decryptionKey.isEmpty &&
       _plan!.local != true &&
       Platform.isAndroid;
 
@@ -1133,6 +1138,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     final plan = _plan;
     if (plan == null || plan.url.isEmpty) {
       throw AppFailure('当前没有可播放的地址，请先等待解析完成');
+    }
+    if (plan.decryptionKey.isNotEmpty) {
+      throw AppFailure('当前内容由内置播放器播放，暂不支持系统播放器');
     }
     final seconds = _currentPosition;
     _player.pause();
@@ -1142,7 +1150,6 @@ class _PlayerScreenState extends State<PlayerScreen>
         url: plan.url,
         title: widget.detail.drama.title,
         referer: plan.headers['Referer'] ?? plan.headers['referer'] ?? '',
-        decryptionKey: plan.decryptionKey,
         position: Duration(milliseconds: (seconds * 1000).round()),
       );
     } on NativePlaybackFailure catch (error) {
