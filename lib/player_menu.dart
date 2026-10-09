@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'core_bridge.dart';
 import 'models.dart';
 import 'episode_browser.dart';
 import 'playback_preferences.dart';
@@ -73,8 +74,15 @@ class _PlayerMenuState extends State<PlayerMenu> {
     });
     try {
       await action();
-    } catch (_) {
-      if (mounted) setState(() => _error = '未能保存设置，请检查存储空间后重试。');
+    } catch (error) {
+      // 播放类操作（系统播放器等）的失败原因比存储提示更有意义
+      if (mounted) {
+        setState(
+          () => _error = error is AppFailure
+              ? error.message
+              : '未能保存设置，请检查存储空间后重试。',
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

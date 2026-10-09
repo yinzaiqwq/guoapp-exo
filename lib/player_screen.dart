@@ -1122,11 +1122,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     return source == 'hongguo' || source == 'hongguotv';
   }
 
-  /// 加密内容或本地播放时不提供系统播放器入口。
+  /// 本地播放不提供系统播放器入口；加密内容由原生侧逐样本解密后播放。
   bool get _canUseNativePlayer =>
       _plan != null &&
       _plan!.url.isNotEmpty &&
-      _plan!.decryptionKey.isEmpty &&
       _plan!.local != true &&
       Platform.isAndroid;
 
@@ -1135,17 +1134,27 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (plan == null || plan.url.isEmpty) {
       throw AppFailure('当前没有可播放的地址，请先等待解析完成');
     }
-    if (plan.decryptionKey.isNotEmpty) {
-      throw AppFailure('当前内容需要应用内解密，暂不支持系统播放器');
-    }
     final seconds = _currentPosition;
     _player.pause();
-    final result = await AppDevice.openNativePlayer(
-      url: plan.url,
-      title: widget.detail.drama.title,
-      referer: plan.headers['Referer'] ?? plan.headers['referer'] ?? '',
-      position: Duration(milliseconds: (seconds * 1000).round()),
-    );
+    final NativePlaybackResult result;
+    try {
+      result = await AppDevice.openNativePlayer(
+        url: plan.url,
+        title: widget.detail.drama.title,
+        referer: plan.headers['Referer'] ?? plan.headers['referer'] ?? '',
+        decryptionKey: plan.decryptionKey,
+        position: Duration(milliseconds: (seconds * 1000).round()),
+      );
+    } on NativePlaybackFailure catch (error) {
+      // 原生播放器自身的失败原因（解密、解码、网络）比通用提示更有意义
+      if (!_closed && _foreground) _player.play();
+      _notice(error.message);
+      return;
+    } catch (_) {
+      // 其他异常恢复内置播放后交给上层处理，避免停留在已暂停状态
+      if (!_closed && _foreground) _player.play();
+      rethrow;
+    }
     if (!mounted || _closed) return;
     // 回来后按原生播放器的进度续播
     if (result.position > Duration.zero) {

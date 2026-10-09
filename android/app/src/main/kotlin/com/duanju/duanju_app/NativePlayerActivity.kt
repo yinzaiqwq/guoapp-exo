@@ -13,6 +13,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -20,6 +21,7 @@ import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.duanju.duanju_app.playback.CencDataSourceFactory
 
 /**
  * 原生全屏播放器：ExoPlayer + PlayerView(SurfaceView)。
@@ -35,6 +37,9 @@ class NativePlayerActivity : Activity() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_REFERER = "referer"
         const val EXTRA_POSITION_MS = "positionMs"
+
+        /** CENC 内容密钥，十六进制 AES-128；为空表示明文播放。 */
+        const val EXTRA_KEY = "key"
         const val RESULT_POSITION_MS = "positionMs"
         const val RESULT_COMPLETED = "completed"
     }
@@ -55,6 +60,8 @@ class NativePlayerActivity : Activity() {
         }
         val referer = intent.getStringExtra(EXTRA_REFERER).orEmpty()
         startPositionMs = intent.getLongExtra(EXTRA_POSITION_MS, 0L)
+        val key = decodeKey(intent.getStringExtra(EXTRA_KEY))
+        val isHls = url.contains(".m3u8", ignoreCase = true)
 
         // 加大缓冲：电视端网络抖动时不易断流
         val loadControl = DefaultLoadControl.Builder()
@@ -76,6 +83,11 @@ class NativePlayerActivity : Activity() {
             .setAllowCrossProtocolRedirects(true)
             .apply { if (referer.isNotEmpty()) setDefaultRequestProperties(mapOf("Referer" to referer)) }
 
+        // 加密 MP4：样本级 CENC 解密后交给解码器；明文与 HLS 直接走原始数据源
+        val dataFactory: DataSource.Factory =
+            if (key != null && !isHls) CencDataSourceFactory(httpFactory, url, referer, key)
+            else httpFactory
+
         val exo = ExoPlayer.Builder(this)
             .setLoadControl(loadControl)
             .build()
@@ -95,10 +107,10 @@ class NativePlayerActivity : Activity() {
         setContentView(view)
 
         val mediaItem = MediaItem.fromUri(Uri.parse(url))
-        val source = if (url.contains(".m3u8", ignoreCase = true)) {
+        val source = if (isHls) {
             HlsMediaSource.Factory(httpFactory).createMediaSource(mediaItem)
         } else {
-            ProgressiveMediaSource.Factory(httpFactory).createMediaSource(mediaItem)
+            ProgressiveMediaSource.Factory(dataFactory).createMediaSource(mediaItem)
         }
         exo.setMediaSource(source)
         if (startPositionMs > 0) exo.seekTo(startPositionMs)
@@ -115,14 +127,45 @@ class NativePlayerActivity : Activity() {
 
             override fun onPlayerError(error: PlaybackException) {
                 // 回传错误，交给 Flutter 侧决定是否降级到内置播放器
+                val reason = error.cause?.message?.takeIf { it.isNotBlank() }
                 setResult(
                     RESULT_FIRST_USER,
-                    Intent().putExtra("error", error.errorCodeName)
+                    Intent().putExtra("error", reason ?: nativeErrorText(error))
                 )
                 finish()
             }
         })
         view.requestFocus()
+    }
+
+    /** 解析十六进制 AES-128 内容密钥；缺失或格式不符时返回 null，按明文播放。 */
+    private fun decodeKey(value: String?): ByteArray? {
+        val text = value?.trim().orEmpty()
+        if (text.length != 32) return null
+        val key = ByteArray(16)
+        for (index in 0 until 16) {
+            val high = Character.digit(text[index * 2], 16)
+            val low = Character.digit(text[index * 2 + 1], 16)
+            if (high < 0 || low < 0) return null
+            key[index] = ((high shl 4) or low).toByte()
+        }
+        return key
+    }
+
+    /** 把 ExoPlayer 错误码翻译成用户能看懂的原因。 */
+    private fun nativeErrorText(error: PlaybackException): String = when (error.errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+            "网络连接失败，请检查网络后重试"
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
+            "媒体地址已失效，请重新解析播放"
+        PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+        PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ->
+            "视频格式不受支持，请切换线路或清晰度"
+        PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+        PlaybackException.ERROR_CODE_DECODING_FAILED ->
+            "设备无法硬解该编码，请切换清晰度或使用内置播放器"
+        else -> "系统播放器播放失败（${error.errorCodeName}）"
     }
 
     private fun finishWithResult() {

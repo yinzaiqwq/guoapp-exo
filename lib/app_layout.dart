@@ -107,12 +107,16 @@ class AppDevice {
 
   /// 用原生 ExoPlayer Activity 全屏播放（SurfaceView 直通，不走 Flutter 合成）。
   ///
+  /// [decryptionKey] 为 CENC 内容的 AES-128 密钥（十六进制）。非空时原生侧会先
+  /// 逐样本解密再交给解码器；明文播放传空字符串。
+  ///
   /// 返回播放结束时的进度；用户中途返回时 [NativePlaybackResult.completed] 为 false。
   /// 失败（含原生播放器解码错误）会抛 [NativePlaybackFailure]。
   static Future<NativePlaybackResult> openNativePlayer({
     required String url,
     String title = '播放',
     String referer = '',
+    String decryptionKey = '',
     Duration position = Duration.zero,
   }) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
@@ -122,6 +126,7 @@ class AppDevice {
       'url': url,
       'title': title,
       'referer': referer,
+      'key': decryptionKey,
       'positionMs': position.inMilliseconds,
     });
     if (data is Map) {

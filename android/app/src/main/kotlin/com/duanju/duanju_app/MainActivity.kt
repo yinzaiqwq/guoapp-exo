@@ -231,6 +231,7 @@ class MainActivity : FlutterActivity() {
                             val url = call.argument<String>("url")
                             val title = call.argument<String>("title") ?: "播放"
                             val referer = call.argument<String>("referer")
+                            val key = call.argument<String>("key")
                             val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
                             if (url.isNullOrEmpty()) {
                                 result.error("invalid_url", "播放地址为空", null)
@@ -242,6 +243,7 @@ class MainActivity : FlutterActivity() {
                                     putExtra(NativePlayerActivity.EXTRA_URL, url)
                                     putExtra(NativePlayerActivity.EXTRA_TITLE, title)
                                     putExtra(NativePlayerActivity.EXTRA_REFERER, referer)
+                                    putExtra(NativePlayerActivity.EXTRA_KEY, key)
                                     putExtra(NativePlayerActivity.EXTRA_POSITION_MS, positionMs)
                                 }
                                 startActivityForResult(intent, nativePlayerRequest)
