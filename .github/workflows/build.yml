@@ -172,7 +172,9 @@ jobs:
 
   release:
     needs: [android]
-    if: always() && needs.android.result == 'success'
+    # pull_request 必须排除：否则任何 PR 都会用 pubspec.yaml 里未提升的版本号
+    # 命中已有 tag，把尚未合并的代码以 --clobber 覆盖到已发布的正式产物上。
+    if: always() && needs.android.result == 'success' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -235,14 +237,11 @@ jobs:
             fi
           } > notes.md
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" release/* --clobber
-            gh release edit "$tag" --title "红果鉴 / 真果鉴 ${version}" --notes-file notes.md
-            # 清理上一次构建留下、本轮已不再产出的附件，避免下载到过期文件。
-            for name in $(gh release view "$tag" --json assets --jq '.assets[].name'); do
-              if [ ! -e "release/$name" ]; then
-                gh release delete-asset "$tag" "$name" --yes
-              fi
-            done
+            # 同名 Release 已存在说明该版本已经发布过。此时覆盖资产会让已经
+            # 拿到该版本的用户下载到内容不同的同名文件，也使历史校验值失效。
+            # 因此拒绝覆盖：需要重新发布时必须先在 pubspec.yaml 提升 version。
+            echo "::error::Release ${tag} 已存在。请先在 pubspec.yaml 提升 version 后再发布，禁止覆盖已发布版本。"
+            exit 1
           else
             gh release create "$tag" release/* --title "红果鉴 / 真果鉴 ${version}" --notes-file notes.md
           fi
