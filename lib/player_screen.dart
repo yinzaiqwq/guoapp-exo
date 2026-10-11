@@ -1223,6 +1223,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         ],
         episodeIndex: _index,
         danmaku: danmaku,
+        qualities: plan.qualities,
+        quality: plan.quality,
         position: Duration(milliseconds: (seconds * 1000).round()),
       );
     } on NativePlaybackFailure catch (error) {
@@ -1239,6 +1241,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 续播进度：无论走哪条路径，下次播放都从系统播放器返回的位置开始
     if (result.position > Duration.zero) {
       _resumePosition = result.position.inMilliseconds / 1000;
+    }
+    // 用户在原生清晰度面板中切换了档位：重新取流后回到原进度
+    final quality = result.quality;
+    if (quality != null && quality != plan.quality) {
+      await _retry(quality: quality);
+      if (result.position > Duration.zero) {
+        await _seekTo(result.position);
+      }
+      return;
     }
     // 用户在原生选集中切换了分集：直接播放目标集
     final target = result.episodeIndex;

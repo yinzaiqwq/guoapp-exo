@@ -32,6 +32,8 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.duanju.duanju_app.playback.CencDataSourceFactory
 import com.duanju.duanju_app.playback.DanmakuView
+import com.duanju.duanju_app.playback.PlayerMenuBar
+import com.duanju.duanju_app.playback.ProgressBarView
 
 /**
  * 原生全屏播放器：ExoPlayer + PlayerView(SurfaceView)。
@@ -64,29 +66,52 @@ class NativePlayerActivity : Activity() {
         /** 弹幕载荷，每行 `时间毫秒\t文本`。 */
         const val EXTRA_DANMAKU = "danmaku"
 
+        /** 可用清晰度档位，以逗号分隔；为空则不显示清晰度入口。 */
+        const val EXTRA_QUALITIES = "qualities"
+
+        /** 当前清晰度，用于在面板中标记。 */
+        const val EXTRA_QUALITY = "quality"
+
         const val RESULT_POSITION_MS = "positionMs"
         const val RESULT_COMPLETED = "completed"
 
         /** 用户在选集中切换了分集，回传目标下标。 */
         const val RESULT_EPISODE_INDEX = "episodeIndex"
+
+        /** 用户切换了清晰度，回传目标档位。 */
+        const val RESULT_QUALITY = "quality"
     }
 
     private var player: ExoPlayer? = null
     private var playerView: PlayerView? = null
     private var danmakuView: DanmakuView? = null
+    private var progressBar: ProgressBarView? = null
+    private var menuBarRef: PlayerMenuBar? = null
     private var panel: View? = null
     private var panelList: LinearLayout? = null
+    private var qualityPanel: View? = null
+    private var qualityList: LinearLayout? = null
     private var hint: TextView? = null
     private var startPositionMs = 0L
     private var finished = false
     private var episodeIndex = 0
     private var episodes: List<String> = emptyList()
     private var selectedIndex = 0
+    private var danmakuEnabled = true
+    private var playbackSpeed = 1.0f
+    private var qualities: List<Int> = emptyList()
+    private var currentQuality = 0
+    private var selectedQuality = 0
 
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
-            danmakuView?.setPosition(player?.currentPosition ?: 0L)
+            val exo = player
+            if (exo != null) {
+                val position = exo.currentPosition
+                danmakuView?.setPosition(position)
+                progressBar?.update(position, exo.duration.coerceAtLeast(0), exo.bufferedPosition)
+            }
             handler.postDelayed(this, 200)
         }
     }
@@ -110,6 +135,13 @@ class NativePlayerActivity : Activity() {
             ?.split('\n')
             ?.filter { it.isNotEmpty() }
             ?: emptyList()
+        qualities = intent.getStringExtra(EXTRA_QUALITIES)
+            ?.split(',')
+            ?.mapNotNull { it.trim().toIntOrNull() }
+            ?.filter { it > 0 }
+            ?: emptyList()
+        currentQuality = intent.getIntExtra(EXTRA_QUALITY, 0)
+        selectedQuality = currentQuality
 
         // 缓冲对齐实测流畅的电视端配置：小缓冲 + 快速起播。
         // 大缓冲会让电视长时间停在加载态，观感上就是卡；这里不是越大越稳。
@@ -148,9 +180,10 @@ class NativePlayerActivity : Activity() {
         val root = FrameLayout(this)
 
         val view = PlayerView(this).apply {
-            useController = true
+            // 关闭 media3 自带控制器：它会消费方向键与确定键，使 Activity 收不到
+            // 遥控器事件。进度与操作提示由下方自绘层承担。
+            useController = false
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -189,9 +222,51 @@ class NativePlayerActivity : Activity() {
         hint = hintView
         root.addView(hintView)
 
+        // 底部操作条：弹幕开关、清晰度、选集、倍速。
+        // 回调里通过 menuBarRef 取自身，避免在初始化表达式中引用尚未赋值的局部变量。
+        val menuBar = PlayerMenuBar(
+            this,
+            onToggleDanmaku = {
+                danmakuEnabled = !danmakuEnabled
+                danmaku.setDanmakuEnabled(danmakuEnabled)
+                menuBarRef?.setDanmakuEnabled(danmakuEnabled)
+                showHint(if (danmakuEnabled) "弹幕已开启" else "弹幕已关闭")
+            },
+            onQuality = { toggleQualityPanel() },
+            onEpisodes = { togglePanel() },
+            onSpeed = {
+                playbackSpeed = nextSpeed(playbackSpeed)
+                exo.setPlaybackSpeed(playbackSpeed)
+                menuBarRef?.setSpeed(playbackSpeed)
+                showHint("倍速 ${playbackSpeed}x")
+            },
+        ).apply {
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM
+            )
+        }
+        menuBarRef = menuBar
+        root.addView(menuBar)
+
+        // 进度条：常驻显示，位于操作条之上
+        val progress = ProgressBarView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                dp(64),
+                Gravity.BOTTOM
+            ).apply { leftMargin = dp(24); rightMargin = dp(24); bottomMargin = dp(16) }
+        }
+        progressBar = progress
+        root.addView(progress)
+
         setContentView(root)
 
         intent.getStringExtra(EXTRA_DANMAKU)?.let { danmaku.load(it) }
+        danmaku.setDanmakuEnabled(danmakuEnabled)
+        menuBar.setDanmakuEnabled(danmakuEnabled)
 
         val mediaItem = MediaItem.fromUri(Uri.parse(url))
         val source = if (isHls) {
@@ -319,6 +394,105 @@ class NativePlayerActivity : Activity() {
         playerView?.requestFocus()
     }
 
+    /** 清晰度面板：列出可用档位，选择后回传由 Flutter 重新取流。 */
+    private fun toggleQualityPanel() {
+        if (qualities.isEmpty()) {
+            showHint("本集没有可切换的清晰度")
+            return
+        }
+        val existing = qualityPanel
+        if (existing != null && existing.visibility == View.VISIBLE) {
+            existing.visibility = View.GONE
+            return
+        }
+        if (existing != null) {
+            existing.visibility = View.VISIBLE
+            highlightQuality()
+            return
+        }
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), 0, dp(16), dp(16))
+        }
+        qualityList = list
+        for (value in qualities) {
+            val row = TextView(this).apply {
+                text = if (value > 0) "${value}P" else "自动"
+                textSize = 16f
+                setPadding(dp(20), dp(12), dp(20), dp(12))
+                setTextColor(Color.WHITE)
+                isFocusable = true
+                setOnClickListener { chooseQuality(value) }
+            }
+            list.addView(row)
+        }
+        val container = FrameLayout(this).apply {
+            setBackgroundColor(Color.argb(215, 0, 0, 0))
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+        scroll.addView(list)
+        container.addView(
+            scroll,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(48); bottomMargin = dp(48) }
+        )
+        container.addView(TextView(this).apply {
+            text = "清晰度"
+            setTextColor(Color.WHITE)
+            textSize = 18f
+            setPadding(dp(24), dp(16), dp(24), dp(8))
+        })
+        qualityPanel = container
+        (window.decorView as ViewGroup).addView(container)
+        highlightQuality()
+    }
+
+    private fun highlightQuality() {
+        selectedQuality = currentQuality
+        highlightQualitySelection()
+    }
+
+    /** 按 selectedQuality 高亮并聚焦，供面板打开与方向键移动时复用。 */
+    private fun highlightQualitySelection() {
+        val list = qualityList ?: return
+        val index = qualities.indexOf(selectedQuality)
+        for (position in 0 until list.childCount) {
+            val row = list.getChildAt(position) as? TextView ?: continue
+            row.setTextColor(
+                if (position == index) Color.parseColor("#FF634C") else Color.WHITE
+            )
+            if (position == index) row.requestFocus()
+        }
+    }
+
+    private fun chooseQuality(value: Int) {
+        qualityPanel?.visibility = View.GONE
+        if (value == currentQuality) return
+        // 切换清晰度需要重新取流，交回 Flutter 处理
+        setResult(
+            RESULT_OK,
+            Intent().apply {
+                putExtra(RESULT_POSITION_MS, player?.currentPosition ?: 0L)
+                putExtra(RESULT_COMPLETED, false)
+                putExtra(RESULT_QUALITY, value)
+            }
+        )
+        finish()
+    }
+
+    /** 倍速档位循环。 */
+    private fun nextSpeed(current: Float): Float {
+        val options = listOf(1.0f, 1.25f, 1.5f, 2.0f, 0.75f)
+        val index = options.indexOfFirst { kotlin.math.abs(it - current) < 0.01f }
+        return options[(index + 1).mod(options.size)]
+    }
+
     private fun chooseEpisode(index: Int) {
         if (index == episodeIndex) {
             closePanel()
@@ -376,6 +550,52 @@ class NativePlayerActivity : Activity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        // 清晰度面板优先：与选集面板同为全屏遮罩
+        if (qualityPanel?.visibility == View.VISIBLE) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    val index = qualities.indexOf(selectedQuality)
+                    val next = (index + 1).coerceAtMost(qualities.size - 1)
+                    if (next >= 0) selectedQuality = qualities[next]
+                    highlightQualitySelection()
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    val index = qualities.indexOf(selectedQuality)
+                    val next = (index - 1).coerceAtLeast(0)
+                    if (next >= 0) selectedQuality = qualities[next]
+                    highlightQualitySelection()
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                    chooseQuality(selectedQuality)
+                    return true
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    qualityPanel?.visibility = View.GONE
+                    menuBarRef?.visibility = View.VISIBLE
+                    menuBarRef?.requestFocusAt(1)
+                    return true
+                }
+            }
+            return true
+        }
+        // 底部操作条展开时，方向键在其内部移动
+        val menu = menuBarRef
+        if (menu?.visibility == View.VISIBLE) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                    if (menu.handleKey(keyCode)) return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_BACK -> {
+                    menu.visibility = View.GONE
+                    playerView?.requestFocus()
+                    return true
+                }
+            }
+        }
         val panelOpen = panel?.visibility == View.VISIBLE
         if (panelOpen) {
             when (keyCode) {
@@ -401,7 +621,19 @@ class NativePlayerActivity : Activity() {
             return true
         }
         when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_MENU -> {
+            // 上键展开底部操作条；再按一次收起
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                val bar = menuBarRef ?: return super.onKeyDown(keyCode, event)
+                if (bar.visibility == View.VISIBLE) {
+                    bar.visibility = View.GONE
+                    playerView?.requestFocus()
+                } else {
+                    bar.visibility = View.VISIBLE
+                    bar.requestFocusAt(0)
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_MENU -> {
                 if (episodes.isNotEmpty()) {
                     togglePanel()
                     return true

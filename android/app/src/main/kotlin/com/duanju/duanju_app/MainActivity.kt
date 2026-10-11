@@ -130,6 +130,11 @@ class MainActivity : FlutterActivity() {
                     payload["episodeIndex"] =
                         data.getIntExtra(NativePlayerActivity.RESULT_EPISODE_INDEX, -1)
                 }
+                // 切换清晰度时回传目标档位，由 Flutter 重新取流
+                if (data?.hasExtra(NativePlayerActivity.RESULT_QUALITY) == true) {
+                    payload["quality"] =
+                        data.getIntExtra(NativePlayerActivity.RESULT_QUALITY, 0)
+                }
                 pending.success(payload)
             }
             RESULT_FIRST_USER -> pending.error(
@@ -241,6 +246,8 @@ class MainActivity : FlutterActivity() {
                             val episodes = call.argument<List<String>>("episodes")
                             val episodeIndex = call.argument<Number>("episodeIndex")?.toInt() ?: 0
                             val danmaku = call.argument<String>("danmaku")
+                            val qualities = call.argument<List<Number>>("qualities")
+                            val quality = call.argument<Number>("quality")?.toInt() ?: 0
                             val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
                             if (url.isNullOrEmpty()) {
                                 result.error("invalid_url", "播放地址为空", null)
@@ -255,9 +262,18 @@ class MainActivity : FlutterActivity() {
                                     putExtra(NativePlayerActivity.EXTRA_KEY, key)
                                     putExtra(NativePlayerActivity.EXTRA_EPISODE_INDEX, episodeIndex)
                                     putExtra(NativePlayerActivity.EXTRA_DANMAKU, danmaku)
+                                    putExtra(NativePlayerActivity.EXTRA_QUALITY, quality)
                                     // 分集标题以换行拼接，避免 Parcelable 列表的开销
                                     if (!episodes.isNullOrEmpty()) {
                                         putExtra(NativePlayerActivity.EXTRA_EPISODES, episodes.joinToString("\n"))
+                                    }
+                                    if (!qualities.isNullOrEmpty()) {
+                                        putExtra(
+                                            NativePlayerActivity.EXTRA_QUALITIES,
+                                            qualities.mapNotNull { it.toInt() }
+                                                .filter { it > 0 }
+                                                .joinToString(",")
+                                        )
                                     }
                                     putExtra(NativePlayerActivity.EXTRA_POSITION_MS, positionMs)
                                 }

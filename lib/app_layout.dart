@@ -123,6 +123,8 @@ class AppDevice {
     List<String> episodes = const [],
     int episodeIndex = 0,
     String danmaku = '',
+    List<int> qualities = const [],
+    int quality = 0,
     Duration position = Duration.zero,
   }) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
@@ -136,6 +138,8 @@ class AppDevice {
       'episodes': episodes,
       'episodeIndex': episodeIndex,
       'danmaku': danmaku,
+      'qualities': qualities,
+      'quality': quality,
       'positionMs': position.inMilliseconds,
     });
     if (data is Map) {
@@ -143,6 +147,7 @@ class AppDevice {
         position: Duration(milliseconds: (data['positionMs'] as num?)?.toInt() ?? 0),
         completed: data['completed'] == true,
         episodeIndex: (data['episodeIndex'] as num?)?.toInt(),
+        quality: (data['quality'] as num?)?.toInt(),
       );
     }
     return const NativePlaybackResult(position: Duration.zero, completed: false);
@@ -154,12 +159,16 @@ class NativePlaybackResult {
     required this.position,
     required this.completed,
     this.episodeIndex,
+    this.quality,
   });
   final Duration position;
   final bool completed;
 
   /// 用户在原生选集中切换的分集下标；未切换时为 null。
   final int? episodeIndex;
+
+  /// 用户在原生清晰度面板中选择的档位；未切换时为 null。
+  final int? quality;
 }
 
 class NativePlaybackFailure implements Exception {
