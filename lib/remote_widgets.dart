@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+import 'scan_search_dialog.dart';
 import 'search_input.dart';
 import 'package:flutter/services.dart';
 
@@ -551,6 +552,17 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
     Navigator.pop(context, target);
   }
 
+  /// 弹出二维码，等手机扫码输入后直接提交搜索。
+  Future<void> _scanSearch() async {
+    final query = await showDialog<String>(
+      context: context,
+      builder: (_) => const ScanSearchDialog(title: '手机扫码输入'),
+    );
+    if (query == null || query.trim().isEmpty) return;
+    if (!mounted) return;
+    Navigator.pop(context, query.trim());
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -562,6 +574,12 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
           Icon(Icons.tv_rounded, color: theme.colorScheme.primary),
           const SizedBox(width: 10),
           Expanded(child: Text(widget.title, style: const TextStyle(fontSize: 20))),
+          TextButton.icon(
+            onPressed: () => unawaited(_scanSearch()),
+            icon: const Icon(Icons.qr_code_2_rounded, size: 22),
+            label: const Text('手机扫码输入'),
+          ),
+          const SizedBox(width: 8),
           IconButton(
             tooltip: '关闭',
             icon: const Icon(Icons.close_rounded),
