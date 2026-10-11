@@ -120,12 +120,18 @@ class MainActivity : FlutterActivity() {
         val pending = nativePlayerResult ?: return
         nativePlayerResult = null
         when (resultCode) {
-            RESULT_OK -> pending.success(
-                mapOf(
+            RESULT_OK -> {
+                val payload = mutableMapOf<String, Any?>(
                     "positionMs" to (data?.getLongExtra(NativePlayerActivity.RESULT_POSITION_MS, 0L) ?: 0L),
                     "completed" to (data?.getBooleanExtra(NativePlayerActivity.RESULT_COMPLETED, false) ?: false),
                 )
-            )
+                // 选集中切换分集时回传目标下标；未切换则不带该键
+                if (data?.hasExtra(NativePlayerActivity.RESULT_EPISODE_INDEX) == true) {
+                    payload["episodeIndex"] =
+                        data.getIntExtra(NativePlayerActivity.RESULT_EPISODE_INDEX, -1)
+                }
+                pending.success(payload)
+            }
             RESULT_FIRST_USER -> pending.error(
                 "playback_failed",
                 data?.getStringExtra("error") ?: "原生播放器失败",
@@ -232,6 +238,9 @@ class MainActivity : FlutterActivity() {
                             val title = call.argument<String>("title") ?: "播放"
                             val referer = call.argument<String>("referer")
                             val key = call.argument<String>("key")
+                            val episodes = call.argument<List<String>>("episodes")
+                            val episodeIndex = call.argument<Number>("episodeIndex")?.toInt() ?: 0
+                            val danmaku = call.argument<String>("danmaku")
                             val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
                             if (url.isNullOrEmpty()) {
                                 result.error("invalid_url", "播放地址为空", null)
@@ -244,6 +253,12 @@ class MainActivity : FlutterActivity() {
                                     putExtra(NativePlayerActivity.EXTRA_TITLE, title)
                                     putExtra(NativePlayerActivity.EXTRA_REFERER, referer)
                                     putExtra(NativePlayerActivity.EXTRA_KEY, key)
+                                    putExtra(NativePlayerActivity.EXTRA_EPISODE_INDEX, episodeIndex)
+                                    putExtra(NativePlayerActivity.EXTRA_DANMAKU, danmaku)
+                                    // 分集标题以换行拼接，避免 Parcelable 列表的开销
+                                    if (!episodes.isNullOrEmpty()) {
+                                        putExtra(NativePlayerActivity.EXTRA_EPISODES, episodes.joinToString("\n"))
+                                    }
                                     putExtra(NativePlayerActivity.EXTRA_POSITION_MS, positionMs)
                                 }
                                 startActivityForResult(intent, nativePlayerRequest)

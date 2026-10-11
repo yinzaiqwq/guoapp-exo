@@ -1159,6 +1159,43 @@ class _PlayerScreenState extends State<PlayerScreen>
       _plan!.local != true &&
       Platform.isAndroid;
 
+  /// 为原生播放器预取整集弹幕，序列化为 `时间毫秒\t文本` 行。
+  ///
+  /// 原生侧不联网，因此这里一次取全：Go 侧按 30 秒窗口分页，逐段累加直到
+  /// 覆盖整集或达到上限。失败不影响播放，返回空串即可。
+  Future<String> _loadNativeDanmaku(PlaybackPlan plan) async {
+    if (!_danmakuEnabled || plan.local || plan.session.isEmpty) return '';
+    if (plan.danmakuId.isEmpty) return '';
+    final duration = _player.state.duration.inMilliseconds;
+    final total = duration > 0 ? duration : 30 * 60 * 1000;
+    final buffer = StringBuffer();
+    var start = 0;
+    // 上限防止异常数据导致长循环；每段最多 90 条，20 段足够覆盖常规剧集
+    for (var page = 0; page < 20 && start < total; page++) {
+      try {
+        final result = await widget.repository.danmaku(
+          plan,
+          startMs: start,
+          durationMs: total,
+        );
+        for (final item in result.items) {
+          final text = item.text.replaceAll('\n', ' ').trim();
+          if (text.isEmpty) continue;
+          buffer.write(item.timeMs);
+          buffer.write('\t');
+          buffer.write(text);
+          buffer.write('\n');
+        }
+        if (result.nextMs <= start) break;
+        start = result.nextMs;
+      } catch (_) {
+        break;
+      }
+      if (_closed) break;
+    }
+    return buffer.toString();
+  }
+
   /// 交给系统播放器并等待返回。
   ///
   /// [mpvHasContent] 表示返回后内置播放器里仍有可续播的内容。自动路由时
@@ -1173,12 +1210,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     final seconds = _currentPosition;
     if (mpvHasContent) _player.pause();
+    final danmaku = await _loadNativeDanmaku(plan);
+    if (!mounted || _closed) return;
     final NativePlaybackResult result;
     try {
       result = await AppDevice.openNativePlayer(
         url: plan.url,
         title: widget.detail.drama.title,
         referer: plan.headers['Referer'] ?? plan.headers['referer'] ?? '',
+        episodes: [
+          for (final episode in widget.detail.episodes) episode.title,
+        ],
+        episodeIndex: _index,
+        danmaku: danmaku,
         position: Duration(milliseconds: (seconds * 1000).round()),
       );
     } on NativePlaybackFailure catch (error) {
@@ -1195,6 +1239,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 续播进度：无论走哪条路径，下次播放都从系统播放器返回的位置开始
     if (result.position > Duration.zero) {
       _resumePosition = result.position.inMilliseconds / 1000;
+    }
+    // 用户在原生选集中切换了分集：直接播放目标集
+    final target = result.episodeIndex;
+    if (target != null && target != _index) {
+      final valid = target >= 0 && target < widget.detail.episodes.length;
+      if (valid) {
+        await _play(target, playWhenReady: true);
+        return;
+      }
     }
     if (result.completed && _preferences.autoAdvance) {
       final next = _index + 1;

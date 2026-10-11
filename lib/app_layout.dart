@@ -110,6 +110,9 @@ class AppDevice {
   /// [decryptionKey] 为 CENC 内容的 AES-128 密钥（十六进制）。非空时原生侧会先
   /// 逐样本解密再交给解码器；明文播放传空字符串。
   ///
+  /// [episodes] 为分集标题，供原生侧自绘选集面板；[danmaku] 为弹幕载荷
+  /// （每行 `时间毫秒\t文本`），两者都为空时不显示对应 UI。
+  ///
   /// 返回播放结束时的进度；用户中途返回时 [NativePlaybackResult.completed] 为 false。
   /// 失败（含原生播放器解码错误）会抛 [NativePlaybackFailure]。
   static Future<NativePlaybackResult> openNativePlayer({
@@ -117,6 +120,9 @@ class AppDevice {
     String title = '播放',
     String referer = '',
     String decryptionKey = '',
+    List<String> episodes = const [],
+    int episodeIndex = 0,
+    String danmaku = '',
     Duration position = Duration.zero,
   }) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
@@ -127,12 +133,16 @@ class AppDevice {
       'title': title,
       'referer': referer,
       'key': decryptionKey,
+      'episodes': episodes,
+      'episodeIndex': episodeIndex,
+      'danmaku': danmaku,
       'positionMs': position.inMilliseconds,
     });
     if (data is Map) {
       return NativePlaybackResult(
         position: Duration(milliseconds: (data['positionMs'] as num?)?.toInt() ?? 0),
         completed: data['completed'] == true,
+        episodeIndex: (data['episodeIndex'] as num?)?.toInt(),
       );
     }
     return const NativePlaybackResult(position: Duration.zero, completed: false);
@@ -140,9 +150,16 @@ class AppDevice {
 }
 
 class NativePlaybackResult {
-  const NativePlaybackResult({required this.position, required this.completed});
+  const NativePlaybackResult({
+    required this.position,
+    required this.completed,
+    this.episodeIndex,
+  });
   final Duration position;
   final bool completed;
+
+  /// 用户在原生选集中切换的分集下标；未切换时为 null。
+  final int? episodeIndex;
 }
 
 class NativePlaybackFailure implements Exception {
