@@ -16,6 +16,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -63,14 +64,16 @@ class NativePlayerActivity : Activity() {
         val key = decodeKey(intent.getStringExtra(EXTRA_KEY))
         val isHls = url.contains(".m3u8", ignoreCase = true)
 
-        // 加大缓冲：电视端网络抖动时不易断流
+        // 缓冲对齐实测流畅的电视端配置：小缓冲 + 快速起播。
+        // 大缓冲会让电视长时间停在加载态，观感上就是卡；这里不是越大越稳。
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                60_000,   // minBufferMs
-                180_000,  // maxBufferMs
-                2_500,    // bufferForPlaybackMs
-                5_000     // bufferForPlaybackAfterRebufferMs
+                15_000,   // minBufferMs
+                30_000,   // maxBufferMs
+                1_000,    // bufferForPlaybackMs
+                2_000     // bufferForPlaybackAfterRebufferMs
             )
+            .setTargetBufferBytes(12 * 1024 * 1024)
             .build()
 
         val httpFactory = DefaultHttpDataSource.Factory()
@@ -88,7 +91,9 @@ class NativePlayerActivity : Activity() {
             if (key != null && !isHls) CencDataSourceFactory(httpFactory, url, referer, key)
             else httpFactory
 
-        val exo = ExoPlayer.Builder(this)
+        // 允许在硬解不可用时回退到软解，避免直接报错
+        val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+        val exo = ExoPlayer.Builder(this, renderers)
             .setLoadControl(loadControl)
             .build()
         player = exo

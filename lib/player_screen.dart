@@ -990,6 +990,22 @@ class _PlayerScreenState extends State<PlayerScreen>
         return;
       }
       final plan = prepared;
+      // 明文内容自动交给系统播放器（硬解 + SurfaceView），避免 mpv 软解掉帧。
+      // 仅 Android；加密与本地内容仍走内置播放器。
+      if (_shouldRouteToNative(plan)) {
+        var routed = false;
+        await _serialize(() async {
+          if (_closed || ticket != _generation) return;
+          _plan = plan;
+          routed = true;
+        });
+        if (!routed) {
+          await widget.repository.release(plan.session);
+          return;
+        }
+        await _openNativePlayer(mpvHasContent: false);
+        return;
+      }
       await _serialize(() async {
         if (_closed || ticket != _generation) {
           await widget.repository.release(plan.session);
@@ -1122,6 +1138,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     return source == 'hongguo' || source == 'hongguotv';
   }
 
+  /// 明文内容在 Android 上优先交给系统播放器：电视端用 libmpv 软解 720p
+  /// 会掉帧，而系统播放器走 MediaCodec 硬解 + SurfaceView 直通。
+  /// 加密内容仍由内置播放器处理（media_kit 的 decryption_key 路径）。
+  bool _shouldRouteToNative(PlaybackPlan plan) =>
+      Platform.isAndroid &&
+      !plan.local &&
+      plan.decryptionKey.isEmpty &&
+      plan.url.isNotEmpty;
+
   /// 加密内容或本地播放时不提供系统播放器入口。
   ///
   /// 加密内容由内置 media_kit 播放：实测原生 ExoPlayer 路径在电视上比
@@ -1134,7 +1159,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       _plan!.local != true &&
       Platform.isAndroid;
 
-  Future<void> _openNativePlayer() async {
+  /// 交给系统播放器并等待返回。
+  ///
+  /// [mpvHasContent] 表示返回后内置播放器里仍有可续播的内容。自动路由时
+  /// mpv 从未加载过本集，此时不能再调用 play()，否则会停留在空播放状态。
+  Future<void> _openNativePlayer({bool mpvHasContent = true}) async {
     final plan = _plan;
     if (plan == null || plan.url.isEmpty) {
       throw AppFailure('当前没有可播放的地址，请先等待解析完成');
@@ -1143,7 +1172,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       throw AppFailure('当前内容由内置播放器播放，暂不支持系统播放器');
     }
     final seconds = _currentPosition;
-    _player.pause();
+    if (mpvHasContent) _player.pause();
     final NativePlaybackResult result;
     try {
       result = await AppDevice.openNativePlayer(
@@ -1154,26 +1183,34 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
     } on NativePlaybackFailure catch (error) {
       // 原生播放器自身的失败原因（解密、解码、网络）比通用提示更有意义
-      if (!_closed && _foreground) _player.play();
+      if (mpvHasContent && !_closed && _foreground) _player.play();
       _notice(error.message);
       return;
     } catch (_) {
       // 其他异常恢复内置播放后交给上层处理，避免停留在已暂停状态
-      if (!_closed && _foreground) _player.play();
+      if (mpvHasContent && !_closed && _foreground) _player.play();
       rethrow;
     }
     if (!mounted || _closed) return;
-    // 回来后按原生播放器的进度续播
+    // 续播进度：无论走哪条路径，下次播放都从系统播放器返回的位置开始
     if (result.position > Duration.zero) {
-      await _seekTo(result.position);
+      _resumePosition = result.position.inMilliseconds / 1000;
     }
     if (result.completed && _preferences.autoAdvance) {
       final next = _index + 1;
       if (next < widget.detail.episodes.length) {
         await _play(next, playWhenReady: true);
+        return;
       }
-    } else {
+    }
+    if (mpvHasContent) {
+      if (result.position > Duration.zero) {
+        await _seekTo(result.position);
+      }
       _player.play();
+    } else if (mounted) {
+      // 自动路由：mpv 无内容，保持暂停并同步一次 UI 进度
+      setState(() {});
     }
   }
 
