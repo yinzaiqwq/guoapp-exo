@@ -100,6 +100,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   late final int _profileEpoch;
   int _openedIndex = -1;
   int _generation = 0;
+
+  /// 原生弹幕推送的批次号：切集或退出时递增，使在途请求作废。
+  int _nativeDanmakuGeneration = 0;
   int _requestedQuality = 0;
   bool _loading = true;
   bool _forceOnline = false;
@@ -1159,19 +1162,21 @@ class _PlayerScreenState extends State<PlayerScreen>
       _plan!.local != true &&
       Platform.isAndroid;
 
-  /// 为原生播放器预取整集弹幕，序列化为 `时间毫秒\t文本` 行。
+
+  /// 为原生播放器预取弹幕并推送到正在运行的原生层。
   ///
-  /// 原生侧不联网，因此这里一次取全：Go 侧按 30 秒窗口分页，逐段累加直到
-  /// 覆盖整集或达到上限。失败不影响播放，返回空串即可。
-  Future<String> _loadNativeDanmaku(PlaybackPlan plan) async {
-    if (!_danmakuEnabled || plan.local || plan.session.isEmpty) return '';
-    if (plan.danmakuId.isEmpty) return '';
+  /// 首次拉取需要服务器向上游取数（实测约 4 秒），因此放在起播之后异步进行，
+  /// 不阻塞画面。取到后通过设备通道推给原生 Activity；若播放器已退出则忽略。
+  Future<void> _pushNativeDanmaku(PlaybackPlan plan, int ticket) async {
+    if (!_danmakuEnabled || plan.local || plan.session.isEmpty) return;
+    if (plan.danmakuId.isEmpty) return;
     final duration = _player.state.duration.inMilliseconds;
     final total = duration > 0 ? duration : 30 * 60 * 1000;
     final buffer = StringBuffer();
     var start = 0;
-    // 上限防止异常数据导致长循环；每段最多 90 条，20 段足够覆盖常规剧集
+    // 上限防止异常数据导致长循环
     for (var page = 0; page < 20 && start < total; page++) {
+      if (_closed || ticket != _nativeDanmakuGeneration) return;
       try {
         final result = await widget.repository.danmaku(
           plan,
@@ -1191,9 +1196,15 @@ class _PlayerScreenState extends State<PlayerScreen>
       } catch (_) {
         break;
       }
-      if (_closed) break;
     }
-    return buffer.toString();
+    if (_closed || ticket != _nativeDanmakuGeneration) return;
+    final payload = buffer.toString();
+    if (payload.isEmpty) return;
+    try {
+      await AppDevice.updateNativeDanmaku(payload);
+    } catch (_) {
+      // 播放器可能已关闭，忽略
+    }
   }
 
   /// 交给系统播放器并等待返回。
@@ -1210,8 +1221,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     final seconds = _currentPosition;
     if (mpvHasContent) _player.pause();
-    final danmaku = await _loadNativeDanmaku(plan);
-    if (!mounted || _closed) return;
+    // 弹幕不在打开播放器前等待：首次拉取需要服务器向上游取数（实测约 4 秒），
+    // 串行等待会让画面黑屏。改为先起播，取到后再推给原生层。
+    final danmakuTicket = ++_nativeDanmakuGeneration;
     final NativePlaybackResult result;
     try {
       result = await AppDevice.openNativePlayer(
@@ -1222,7 +1234,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           for (final episode in widget.detail.episodes) episode.title,
         ],
         episodeIndex: _index,
-        danmaku: danmaku,
+        danmaku: '',
         qualities: plan.qualities,
         quality: plan.quality,
         position: Duration(milliseconds: (seconds * 1000).round()),
@@ -1237,6 +1249,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (mpvHasContent && !_closed && _foreground) _player.play();
       rethrow;
     }
+    unawaited(_pushNativeDanmaku(plan, danmakuTicket));
     if (!mounted || _closed) return;
     // 续播进度：无论走哪条路径，下次播放都从系统播放器返回的位置开始
     if (result.position > Duration.zero) {

@@ -115,6 +115,20 @@ class AppDevice {
   ///
   /// 返回播放结束时的进度；用户中途返回时 [NativePlaybackResult.completed] 为 false。
   /// 失败（含原生播放器解码错误）会抛 [NativePlaybackFailure]。
+  /// 向正在运行的原生播放器推送弹幕载荷（每行 `时间毫秒\t文本`）。
+  ///
+  /// 弹幕首次拉取需要服务器向上游取数，因此不随播放器一起传入，而是在
+  /// 起播后异步推送，避免阻塞画面。原生播放器未运行时静默忽略。
+  static Future<void> updateNativeDanmaku(String payload) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (payload.isEmpty) return;
+    try {
+      await channel.invokeMethod('updateNativeDanmaku', {'danmaku': payload});
+    } catch (_) {
+      // 播放器可能已关闭
+    }
+  }
+
   static Future<NativePlaybackResult> openNativePlayer({
     required String url,
     String title = '播放',

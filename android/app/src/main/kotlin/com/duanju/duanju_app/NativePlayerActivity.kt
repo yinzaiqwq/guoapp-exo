@@ -80,6 +80,21 @@ class NativePlayerActivity : Activity() {
 
         /** 用户切换了清晰度，回传目标档位。 */
         const val RESULT_QUALITY = "quality"
+
+        /**
+         * 当前正在运行的播放器实例。弹幕在起播后异步取回，需要由外部推入。
+         * 用弱引用避免 Activity 泄漏；同一时刻只允许一个播放器。
+         */
+        @Volatile
+        private var current: java.lang.ref.WeakReference<NativePlayerActivity>? = null
+
+        /** 向正在运行的播放器推送弹幕载荷；未运行时忽略。 */
+        @JvmStatic
+        fun pushDanmaku(payload: String?) {
+            if (payload.isNullOrEmpty()) return
+            val activity = current?.get() ?: return
+            activity.runOnUiThread { activity.danmakuView?.load(payload) }
+        }
     }
 
     private var player: ExoPlayer? = null
@@ -118,6 +133,7 @@ class NativePlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        current = java.lang.ref.WeakReference(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
@@ -318,6 +334,9 @@ class NativePlayerActivity : Activity() {
     /** 选集面板：方向键移动、确定键切换、返回键收起。 */
     private fun togglePanel() {
         if (episodes.isEmpty()) return
+        // 面板与操作条都消费方向键，同时可见时 onKeyDown 会先命中操作条，
+        // 导致面板收不到输入。这里统一收起，调用点无需各自处理。
+        menuBarRef?.visibility = View.GONE
         val existing = panel
         if (existing != null && existing.visibility == View.VISIBLE) {
             closePanel()
@@ -400,6 +419,8 @@ class NativePlayerActivity : Activity() {
             showHint("本集没有可切换的清晰度")
             return
         }
+        // 同 togglePanel：避免操作条抢走方向键
+        menuBarRef?.visibility = View.GONE
         val existing = qualityPanel
         if (existing != null && existing.visibility == View.VISIBLE) {
             existing.visibility = View.GONE
@@ -683,6 +704,7 @@ class NativePlayerActivity : Activity() {
     override fun onDestroy() {
         handler.removeCallbacks(tick)
         handler.removeCallbacks(hideHint)
+        if (current?.get() === this) current = null
         (panel?.parent as? ViewGroup)?.removeView(panel)
         panel = null
         panelList = null

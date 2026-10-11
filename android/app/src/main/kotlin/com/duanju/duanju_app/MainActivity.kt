@@ -280,6 +280,12 @@ class MainActivity : FlutterActivity() {
                                 startActivityForResult(intent, nativePlayerRequest)
                             }
                         }
+                        "updateNativeDanmaku" -> {
+                            // 弹幕在起播后异步取回，推给正在运行的原生播放器
+                            val payload = call.argument<String>("danmaku")
+                            NativePlayerActivity.pushDanmaku(payload)
+                            result.success(null)
+                        }
                         "openExternalPlayer" -> {
                             val url = call.argument<String>("url")
                             val title = call.argument<String>("title") ?: "短剧"
