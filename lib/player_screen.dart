@@ -1141,12 +1141,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     return source == 'hongguo' || source == 'hongguotv';
   }
 
-  /// 明文内容在 Android 上优先交给系统播放器：电视端用 libmpv 软解 720p
-  /// 会掉帧，而系统播放器走 MediaCodec 硬解 + SurfaceView 直通。
+  /// 明文内容在 Android 上优先交给系统播放器：电视端用 libmpv 软解会掉帧，
+  /// 而系统播放器走 MediaCodec 硬解 + SurfaceView 直通。
+  /// 本地文件同样适用（原生侧用 DefaultDataSource，可读 file://）。
   /// 加密内容仍由内置播放器处理（media_kit 的 decryption_key 路径）。
   bool _shouldRouteToNative(PlaybackPlan plan) =>
       Platform.isAndroid &&
-      !plan.local &&
       plan.decryptionKey.isEmpty &&
       plan.url.isNotEmpty;
 
@@ -1226,8 +1226,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     final danmakuTicket = ++_nativeDanmakuGeneration;
     final NativePlaybackResult result;
     try {
+      // 本地下载的 plan.url 是绝对路径，MediaItem.fromUri 需要 file:// 形式；
+      // 网络地址原样传递。
+      final nativeUrl = plan.local && !plan.url.contains('://')
+          ? Uri.file(plan.url).toString()
+          : plan.url;
       result = await AppDevice.openNativePlayer(
-        url: plan.url,
+        url: nativeUrl,
         title: widget.detail.drama.title,
         referer: plan.headers['Referer'] ?? plan.headers['referer'] ?? '',
         episodes: [
@@ -1237,6 +1242,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         danmaku: '',
         qualities: plan.qualities,
         quality: plan.quality,
+        speed: _speed,
         position: Duration(milliseconds: (seconds * 1000).round()),
       );
     } on NativePlaybackFailure catch (error) {
@@ -1254,6 +1260,14 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 续播进度：无论走哪条路径，下次播放都从系统播放器返回的位置开始
     if (result.position > Duration.zero) {
       _resumePosition = result.position.inMilliseconds / 1000;
+    }
+    // 用户在原生播放器里调整了倍速：持久化，切集与下次播放都沿用
+    final speed = result.speed;
+    if (speed != null && speed > 0 && speed != _speed) {
+      _speed = speed;
+      unawaited(
+        _setPreferences(_preferences.copyWith(speed: speed)),
+      );
     }
     // 用户在原生清晰度面板中切换了档位：重新取流后回到原进度
     final quality = result.quality;

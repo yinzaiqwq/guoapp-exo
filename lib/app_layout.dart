@@ -139,6 +139,7 @@ class AppDevice {
     String danmaku = '',
     List<int> qualities = const [],
     int quality = 0,
+    double speed = 1,
     Duration position = Duration.zero,
   }) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
@@ -154,6 +155,7 @@ class AppDevice {
       'danmaku': danmaku,
       'qualities': qualities,
       'quality': quality,
+      'speed': speed,
       'positionMs': position.inMilliseconds,
     });
     if (data is Map) {
@@ -162,6 +164,7 @@ class AppDevice {
         completed: data['completed'] == true,
         episodeIndex: (data['episodeIndex'] as num?)?.toInt(),
         quality: (data['quality'] as num?)?.toInt(),
+        speed: (data['speed'] as num?)?.toDouble(),
       );
     }
     return const NativePlaybackResult(position: Duration.zero, completed: false);
@@ -174,6 +177,7 @@ class NativePlaybackResult {
     required this.completed,
     this.episodeIndex,
     this.quality,
+    this.speed,
   });
   final Duration position;
   final bool completed;
@@ -183,6 +187,9 @@ class NativePlaybackResult {
 
   /// 用户在原生清晰度面板中选择的档位；未切换时为 null。
   final int? quality;
+
+  /// 用户调整后的倍速；未调整时为 null。
+  final double? speed;
 }
 
 class NativePlaybackFailure implements Exception {

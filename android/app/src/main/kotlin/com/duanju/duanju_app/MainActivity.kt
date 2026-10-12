@@ -135,6 +135,10 @@ class MainActivity : FlutterActivity() {
                     payload["quality"] =
                         data.getIntExtra(NativePlayerActivity.RESULT_QUALITY, 0)
                 }
+                if (data?.hasExtra(NativePlayerActivity.RESULT_SPEED) == true) {
+                    payload["speed"] =
+                        data.getFloatExtra(NativePlayerActivity.RESULT_SPEED, 1.0f)
+                }
                 pending.success(payload)
             }
             RESULT_FIRST_USER -> pending.error(
@@ -248,6 +252,7 @@ class MainActivity : FlutterActivity() {
                             val danmaku = call.argument<String>("danmaku")
                             val qualities = call.argument<List<Number>>("qualities")
                             val quality = call.argument<Number>("quality")?.toInt() ?: 0
+                            val speed = call.argument<Number>("speed")?.toFloat() ?: 1.0f
                             val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
                             if (url.isNullOrEmpty()) {
                                 result.error("invalid_url", "播放地址为空", null)
@@ -263,6 +268,7 @@ class MainActivity : FlutterActivity() {
                                     putExtra(NativePlayerActivity.EXTRA_EPISODE_INDEX, episodeIndex)
                                     putExtra(NativePlayerActivity.EXTRA_DANMAKU, danmaku)
                                     putExtra(NativePlayerActivity.EXTRA_QUALITY, quality)
+                                    putExtra(NativePlayerActivity.EXTRA_SPEED, speed)
                                     // 分集标题以换行拼接，避免 Parcelable 列表的开销
                                     if (!episodes.isNullOrEmpty()) {
                                         putExtra(NativePlayerActivity.EXTRA_EPISODES, episodes.joinToString("\n"))

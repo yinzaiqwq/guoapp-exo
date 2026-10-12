@@ -22,6 +22,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -81,6 +82,15 @@ class NativePlayerActivity : Activity() {
         /** 用户切换了清晰度，回传目标档位。 */
         const val RESULT_QUALITY = "quality"
 
+        /** 用户调整了倍速，回传当前值；Flutter 侧持久化，切集后沿用。 */
+        const val RESULT_SPEED = "speed"
+
+        /** 初始倍速，由 Flutter 侧传入。 */
+        const val EXTRA_SPEED = "speed"
+
+        /** 可选倍速档位。 */
+        val SPEED_OPTIONS = floatArrayOf(1.0f, 1.25f, 1.5f, 2.0f, 0.75f)
+
         /**
          * 当前正在运行的播放器实例。弹幕在起播后异步取回，需要由外部推入。
          * 用弱引用避免 Activity 泄漏；同一时刻只允许一个播放器。
@@ -104,6 +114,7 @@ class NativePlayerActivity : Activity() {
     private var menuBarRef: PlayerMenuBar? = null
     private var panel: View? = null
     private var panelList: LinearLayout? = null
+    private var panelScroll: ScrollView? = null
     private var qualityPanel: View? = null
     private var qualityList: LinearLayout? = null
     private var hint: TextView? = null
@@ -158,6 +169,9 @@ class NativePlayerActivity : Activity() {
             ?: emptyList()
         currentQuality = intent.getIntExtra(EXTRA_QUALITY, 0)
         selectedQuality = currentQuality
+        playbackSpeed = intent.getFloatExtra(EXTRA_SPEED, 1.0f)
+            .takeIf { candidate -> SPEED_OPTIONS.any { kotlin.math.abs(it - candidate) < 0.01f } }
+            ?: 1.0f
 
         // 缓冲对齐实测流畅的电视端配置：小缓冲 + 快速起播。
         // 大缓冲会让电视长时间停在加载态，观感上就是卡；这里不是越大越稳。
@@ -181,10 +195,13 @@ class NativePlayerActivity : Activity() {
             .setAllowCrossProtocolRedirects(true)
             .apply { if (referer.isNotEmpty()) setDefaultRequestProperties(mapOf("Referer" to referer)) }
 
-        // 加密 MP4：样本级 CENC 解密后交给解码器；明文与 HLS 直接走原始数据源
+        // 明文内容用 DefaultDataSource：它按 URI scheme 分派，
+        // 本地文件走 FileDataSource，网络请求走上面配好 UA/Referer 的 httpFactory。
+        // 加密内容仍用 CencDataSourceFactory（仅支持网络地址，本地加密文件由调用方排除）。
+        val localCapable: DataSource.Factory = DefaultDataSource.Factory(this, httpFactory)
         val dataFactory: DataSource.Factory =
             if (key != null && !isHls) CencDataSourceFactory(httpFactory, url, referer, key)
-            else httpFactory
+            else localCapable
 
         // 允许在硬解不可用时回退到软解，避免直接报错
         val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
@@ -286,7 +303,7 @@ class NativePlayerActivity : Activity() {
 
         val mediaItem = MediaItem.fromUri(Uri.parse(url))
         val source = if (isHls) {
-            HlsMediaSource.Factory(httpFactory).createMediaSource(mediaItem)
+            HlsMediaSource.Factory(localCapable).createMediaSource(mediaItem)
         } else {
             ProgressiveMediaSource.Factory(dataFactory).createMediaSource(mediaItem)
         }
@@ -313,6 +330,8 @@ class NativePlayerActivity : Activity() {
                 finish()
             }
         })
+        exo.setPlaybackSpeed(playbackSpeed)
+        menuBarRef?.setSpeed(playbackSpeed)
         view.requestFocus()
         handler.post(tick)
     }
@@ -359,6 +378,7 @@ class NativePlayerActivity : Activity() {
         }
         val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
         scroll.addView(list)
+        panelScroll = scroll
         container.addView(
             scroll,
             FrameLayout.LayoutParams(
@@ -405,6 +425,18 @@ class NativePlayerActivity : Activity() {
         for (index in 0 until list.childCount) {
             val row = list.getChildAt(index) as? TextView ?: continue
             row.setTextColor(if (index == selectedIndex) Color.parseColor("#FF634C") else Color.WHITE)
+            // 行不可聚焦（否则会抢走方向键），滚动改由这里驱动：
+            // 把当前项滚入视野，否则超出首屏的集数无法选中。
+            if (index == selectedIndex) scrollIntoView(row)
+        }
+    }
+
+    /** 把目标行滚动到面板可视区域内。 */
+    private fun scrollIntoView(row: View) {
+        val scroll = panelScroll ?: return
+        scroll.post {
+            val top = row.top - (scroll.height - row.height) / 2
+            scroll.smoothScrollTo(0, top.coerceAtLeast(0))
         }
     }
 
@@ -502,6 +534,7 @@ class NativePlayerActivity : Activity() {
                 putExtra(RESULT_POSITION_MS, player?.currentPosition ?: 0L)
                 putExtra(RESULT_COMPLETED, false)
                 putExtra(RESULT_QUALITY, value)
+                putExtra(RESULT_SPEED, playbackSpeed)
             }
         )
         finish()
@@ -509,9 +542,8 @@ class NativePlayerActivity : Activity() {
 
     /** 倍速档位循环。 */
     private fun nextSpeed(current: Float): Float {
-        val options = listOf(1.0f, 1.25f, 1.5f, 2.0f, 0.75f)
-        val index = options.indexOfFirst { kotlin.math.abs(it - current) < 0.01f }
-        return options[(index + 1).mod(options.size)]
+        val index = SPEED_OPTIONS.indexOfFirst { kotlin.math.abs(it - current) < 0.01f }
+        return SPEED_OPTIONS[(index + 1).mod(SPEED_OPTIONS.size)]
     }
 
     private fun chooseEpisode(index: Int) {
@@ -526,6 +558,7 @@ class NativePlayerActivity : Activity() {
                 putExtra(RESULT_POSITION_MS, player?.currentPosition ?: 0L)
                 putExtra(RESULT_COMPLETED, false)
                 putExtra(RESULT_EPISODE_INDEX, index)
+                putExtra(RESULT_SPEED, playbackSpeed)
             }
         )
         finish()
@@ -565,6 +598,7 @@ class NativePlayerActivity : Activity() {
         val data = Intent().apply {
             putExtra(RESULT_POSITION_MS, player?.currentPosition ?: 0L)
             putExtra(RESULT_COMPLETED, finished)
+            putExtra(RESULT_SPEED, playbackSpeed)
         }
         setResult(RESULT_OK, data)
         finish()
