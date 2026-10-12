@@ -32,8 +32,8 @@ internal class PlayerMenuBar(
 
     init {
         setBackgroundColor(Color.argb(200, 0, 0, 0))
-        isFocusable = true
-        isFocusableInTouchMode = true
+        // 容器自身不抢焦点：按键统一由 Activity 分发给 handleKey
+        isFocusable = false
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -50,7 +50,10 @@ internal class PlayerMenuBar(
                 textSize = 17f
                 setTextColor(Color.WHITE)
                 setPadding(dp(20), dp(10), dp(20), dp(10))
-                isFocusable = true
+                // 刻意不聚焦：若子项可聚焦，Android 的 View 系统会自行在它们
+                // 之间移动焦点并消费方向键，使 Activity.onKeyDown 收不到事件，
+                // 本类的 focused 也会与实际焦点脱节。焦点与高亮统一由本类管理。
+                isFocusable = false
                 setOnClickListener { action() }
             }
             items.add(view)
@@ -85,7 +88,6 @@ internal class PlayerMenuBar(
                 setColor(if (active) Color.argb(60, 255, 99, 76) else Color.TRANSPARENT)
                 cornerRadius = dp(8).toFloat()
             }
-            if (active) view.requestFocus()
         }
     }
 
@@ -118,8 +120,8 @@ internal class PlayerMenuBar(
         return false
     }
 
-    /** 外部改变焦点项后同步高亮（如清晰度面板返回）。 */
-    fun requestFocusAt(index: Int) {
+    /** 外部指定当前项并同步高亮（如从清晰度面板返回）。 */
+    fun selectItem(index: Int) {
         focused = index.coerceIn(0, items.size - 1)
         highlight()
     }

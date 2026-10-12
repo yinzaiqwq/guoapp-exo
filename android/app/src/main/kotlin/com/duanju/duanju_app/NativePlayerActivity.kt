@@ -354,8 +354,8 @@ class NativePlayerActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            isFocusable = true
-            isFocusableInTouchMode = true
+            // 不聚焦：按键统一由 Activity.onKeyDown 处理
+            isFocusable = false
         }
         val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
         scroll.addView(list)
@@ -375,7 +375,6 @@ class NativePlayerActivity : Activity() {
         container.addView(title)
         panel = container
         (window.decorView as ViewGroup).addView(container)
-        container.requestFocus()
         highlightSelected()
     }
 
@@ -391,7 +390,9 @@ class NativePlayerActivity : Activity() {
                 textSize = 16f
                 setPadding(dp(20), dp(12), dp(20), dp(12))
                 setTextColor(Color.WHITE)
-                isFocusable = true
+                // 不聚焦：可聚焦子项会自行消费方向键，使 Activity.onKeyDown
+                // 收不到事件。焦点与高亮由 highlightSelected 统一管理。
+                isFocusable = false
                 setOnClickListener { chooseEpisode(index) }
             }
             list.addView(row)
@@ -404,7 +405,6 @@ class NativePlayerActivity : Activity() {
         for (index in 0 until list.childCount) {
             val row = list.getChildAt(index) as? TextView ?: continue
             row.setTextColor(if (index == selectedIndex) Color.parseColor("#FF634C") else Color.WHITE)
-            if (index == selectedIndex) row.requestFocus()
         }
     }
 
@@ -442,7 +442,8 @@ class NativePlayerActivity : Activity() {
                 textSize = 16f
                 setPadding(dp(20), dp(12), dp(20), dp(12))
                 setTextColor(Color.WHITE)
-                isFocusable = true
+                // 同选集：不聚焦，避免消费方向键
+                isFocusable = false
                 setOnClickListener { chooseQuality(value) }
             }
             list.addView(row)
@@ -488,7 +489,6 @@ class NativePlayerActivity : Activity() {
             row.setTextColor(
                 if (position == index) Color.parseColor("#FF634C") else Color.WHITE
             )
-            if (position == index) row.requestFocus()
         }
     }
 
@@ -595,7 +595,7 @@ class NativePlayerActivity : Activity() {
                 KeyEvent.KEYCODE_BACK -> {
                     qualityPanel?.visibility = View.GONE
                     menuBarRef?.visibility = View.VISIBLE
-                    menuBarRef?.requestFocusAt(1)
+                    menuBarRef?.selectItem(1)
                     return true
                 }
             }
@@ -650,7 +650,7 @@ class NativePlayerActivity : Activity() {
                     playerView?.requestFocus()
                 } else {
                     bar.visibility = View.VISIBLE
-                    bar.requestFocusAt(0)
+                    bar.selectItem(0)
                 }
                 return true
             }
