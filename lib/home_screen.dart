@@ -409,15 +409,27 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _televisionBack() {
+  /// 电视端返回键：按「内层到外层」逐级退出。
+  ///
+  /// 返回 true 表示本次返回已被消费（不退出应用）；false 表示已在最外层，
+  /// 交给系统处理。原实现只清关键词而不关搜索栏，且最外层不做任何事，
+  /// 于是出现「退不出去」与「一按就退出」两种相反的表现。
+  bool _televisionBack() {
     if (_selectionMode) {
       _cancelSelection();
-    } else if (_tab != 0) {
-      setState(() => _tab = 0);
-    } else if (_search.text.isNotEmpty) {
+      return true;
+    }
+    if (_searchVisible || _search.text.isNotEmpty) {
       _search.clear();
       _searchChanged('');
+      setState(() => _searchVisible = false);
+      return true;
     }
+    if (_tab != 0) {
+      setState(() => _tab = 0);
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -1153,9 +1165,12 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         if (!television && !_selectionMode) return scaffold;
         return PopScope(
+          // 搜索栏展开或有选中项时禁止直接 pop，先由 _televisionBack 逐级收起
           canPop:
               !_selectionMode &&
-              (!television || _tab == 0 && _search.text.isEmpty),
+              !_searchVisible &&
+              _search.text.isEmpty &&
+              (!television || _tab == 0),
           onPopInvokedWithResult: (didPop, result) {
             if (!didPop) _televisionBack();
           },

@@ -5,24 +5,35 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.os.SystemClock
 import android.view.View
 
 /**
  * 弹幕渲染层，叠加在 SurfaceView 之上。
  *
- * 数据由 Flutter 侧按集预取后传入（原生侧不联网），按播放进度计算位置：
- * 每条弹幕从右向左匀速穿过屏幕，进度由 [setPosition] 推进。
+ * 两条设计要点：
  *
- * 无状态渲染：位置完全由「当前进度 - 弹幕时间」推导，因此 seek 后画面
- * 立即正确，不需要重建活动列表。
+ * 1. 用单调时钟自行驱动重绘。播放进度每 200ms 才上报一次，若只在该回调里
+ *    invalidate，弹幕会一顿一顿地跳；这里按 SystemClock.uptimeMillis 计算
+ *    平滑位移，配合 postInvalidateOnAnimation 逐帧绘制。
+ *
+ * 2. 只遍历当前可见的时间窗口。整集弹幕可达数百条，逐帧遍历全部会显著掉帧；
+ *    条目按时间排序后用二分定位窗口起点，只处理窗口内的少量条目。
  */
 internal class DanmakuView(context: Context) : View(context) {
 
     private data class Item(val timeMs: Long, val text: String)
 
     private var items: List<Item> = emptyList()
-    private var positionMs = 0L
     private var enabled = true
+
+    /** 播放进度对应的时钟基准：positionMs 对应 uptimeMs 时刻。 */
+    private var anchorPositionMs = 0L
+    private var anchorUptimeMs = 0L
+    private var playing = true
+
+    /** 是否有内容需要逐帧绘制。 */
+    private var animating = false
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -38,13 +49,12 @@ internal class DanmakuView(context: Context) : View(context) {
         strokeWidth = 4f
     }
 
-    /** 一条弹幕穿过屏幕所需时间；越短越快。 */
+    /** 一条弹幕穿过屏幕所需时间。 */
     private val travelMs = 9_000f
     private val laneHeight = 46f
     private val topMargin = 24f
 
     init {
-        // 不参与焦点与触摸，避免遮挡遥控器操作
         isFocusable = false
         isClickable = false
         setWillNotDraw(false)
@@ -66,33 +76,77 @@ internal class DanmakuView(context: Context) : View(context) {
         }
         parsed.sortBy { it.timeMs }
         items = parsed
-        invalidate()
+        restart()
     }
 
     /** 开关弹幕显示。命名避开 View.setEnabled，那是控件可用状态。 */
     fun setDanmakuEnabled(value: Boolean) {
         enabled = value
-        if (!value) items = emptyList()
-        invalidate()
+        if (!value) {
+            animating = false
+            invalidate()
+        } else {
+            restart()
+        }
     }
 
-    /** 由播放进度驱动重绘。 */
-    fun setPosition(ms: Long) {
-        positionMs = ms
-        if (items.isNotEmpty()) invalidate()
+    /**
+     * 上报播放进度，重建时钟基准。
+     *
+     * 播放中每 200ms 调用一次；两次调用之间由 uptimeMillis 推算当前位置，
+     * 因此位移是连续的而不是阶梯式的。
+     */
+    fun setPosition(ms: Long, isPlaying: Boolean = true) {
+        anchorPositionMs = ms
+        anchorUptimeMs = SystemClock.uptimeMillis()
+        playing = isPlaying
+        restart()
+    }
+
+    /** 启动逐帧绘制。 */
+    private fun restart() {
+        if (!enabled || items.isEmpty() || animating) return
+        animating = true
+        postInvalidateOnAnimation()
+    }
+
+    /** 当前播放位置：暂停时用锚点，播放中按单调时钟外推。 */
+    private fun currentPositionMs(): Long {
+        if (!playing) return anchorPositionMs
+        val elapsed = SystemClock.uptimeMillis() - anchorUptimeMs
+        return anchorPositionMs + elapsed
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (!enabled || items.isEmpty()) return
+        if (!enabled || items.isEmpty()) {
+            animating = false
+            return
+        }
         val width = width.toFloat()
-        if (width <= 0f) return
-        val lanes = maxOf(1, ((height - topMargin) / laneHeight).toInt())
+        if (width <= 0f) {
+            animating = false
+            return
+        }
 
-        for ((index, item) in items.withIndex()) {
-            val elapsed = positionMs - item.timeMs
-            // 只画屏幕上正在飞的，以及即将出现的少量
-            if (elapsed < 0 || elapsed > travelMs.toLong()) continue
+        val now = currentPositionMs()
+        // 只处理 [now - travelMs, now] 窗口内的条目：早于窗口的已飞出屏幕，
+        // 晚于 now 的还没进场。二分定位窗口起点。
+        val windowStart = now - travelMs.toLong()
+        var low = 0
+        var high = items.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (items[middle].timeMs < windowStart) low = middle + 1 else high = middle
+        }
+
+        val lanes = maxOf(1, ((height - topMargin) / laneHeight).toInt())
+        var drawn = 0
+        for (index in low until items.size) {
+            val item = items[index]
+            val elapsed = now - item.timeMs
+            if (elapsed < 0) break
+            if (elapsed > travelMs.toLong()) continue
             val textWidth = paint.measureText(item.text)
             val x = width - (width + textWidth) * (elapsed / travelMs)
             if (x > width || x + textWidth < 0f) continue
@@ -100,6 +154,15 @@ internal class DanmakuView(context: Context) : View(context) {
             val y = topMargin + lane * laneHeight + paint.textSize
             canvas.drawText(item.text, x, y, strokePaint)
             canvas.drawText(item.text, x, y, paint)
+            drawn++
+        }
+
+        // 还有内容在窗口内就继续逐帧刷新；否则停下来省电。
+        val hasPending = items.lastOrNull()?.timeMs?.let { it > now } ?: false
+        if (drawn > 0 || hasPending) {
+            postInvalidateOnAnimation()
+        } else {
+            animating = false
         }
     }
 }

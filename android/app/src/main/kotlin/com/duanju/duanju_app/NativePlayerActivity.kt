@@ -128,6 +128,7 @@ class NativePlayerActivity : Activity() {
     private var qualities: List<Int> = emptyList()
     private var currentQuality = 0
     private var selectedQuality = 0
+    private var backArmed = false
 
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
@@ -135,7 +136,8 @@ class NativePlayerActivity : Activity() {
             val exo = player
             if (exo != null) {
                 val position = exo.currentPosition
-                danmakuView?.setPosition(position)
+                // 传入播放状态：暂停时弹幕停在原位，不随墙钟继续漂移
+                danmakuView?.setPosition(position, exo.isPlaying)
                 progressBar?.update(position, exo.duration.coerceAtLeast(0), exo.bufferedPosition)
             }
             handler.postDelayed(this, 200)
@@ -284,8 +286,9 @@ class NativePlayerActivity : Activity() {
         menuBarRef = menuBar
         root.addView(menuBar)
 
-        // 进度条：常驻显示，位于操作条之上
+        // 进度条：操作时显示，静置 3 秒后自动隐藏，避免长时间遮挡画面
         val progress = ProgressBarView(this).apply {
+            visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 dp(64),
@@ -334,10 +337,25 @@ class NativePlayerActivity : Activity() {
         menuBarRef?.setSpeed(playbackSpeed)
         view.requestFocus()
         handler.post(tick)
+        revealProgress()
     }
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
+
+    /** 显示进度条并在 3 秒后自动隐藏。 */
+    private fun revealProgress() {
+        val bar = progressBar ?: return
+        bar.visibility = View.VISIBLE
+        handler.removeCallbacks(hideProgress)
+        handler.postDelayed(hideProgress, 3_000)
+    }
+
+    private val hideProgress = Runnable {
+        if (menuBarRef?.visibility != View.VISIBLE) {
+            progressBar?.visibility = View.GONE
+        }
+    }
 
     /** 短暂显示一行提示，2 秒后自动隐藏。 */
     private fun showHint(text: String) {
@@ -681,10 +699,12 @@ class NativePlayerActivity : Activity() {
                 val bar = menuBarRef ?: return super.onKeyDown(keyCode, event)
                 if (bar.visibility == View.VISIBLE) {
                     bar.visibility = View.GONE
+                    progressBar?.visibility = View.GONE
                     playerView?.requestFocus()
                 } else {
                     bar.visibility = View.VISIBLE
                     bar.selectItem(0)
+                    revealProgress()
                 }
                 return true
             }
@@ -704,6 +724,7 @@ class NativePlayerActivity : Activity() {
                         showHint("播放中")
                     }
                 }
+                revealProgress()
                 return true
             }
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -711,6 +732,7 @@ class NativePlayerActivity : Activity() {
                     it.seekTo((it.currentPosition + 10_000).coerceAtMost(it.duration.coerceAtLeast(0)))
                     showHint("快进 10 秒")
                 }
+                revealProgress()
                 return true
             }
             KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_DPAD_LEFT -> {
@@ -718,10 +740,36 @@ class NativePlayerActivity : Activity() {
                     it.seekTo((it.currentPosition - 10_000).coerceAtLeast(0))
                     showHint("快退 10 秒")
                 }
+                revealProgress()
+                return true
+            }
+            // 无面板时：第一次按返回收起操作条，再按一次才退出播放。
+            // 直接透传会导致误触返回键立即退出整集。
+            KeyEvent.KEYCODE_BACK -> {
+                if (menuBarRef?.visibility == View.VISIBLE) {
+                    menuBarRef?.visibility = View.GONE
+                    playerView?.requestFocus()
+                    return true
+                }
+                if (backArmed) {
+                    finishWithResult()
+                    return true
+                }
+                backArmed = true
+                showHint("再按一次返回退出播放")
+                handler.removeCallbacks(disarmBack)
+        handler.removeCallbacks(hideProgress)
+                handler.postDelayed(disarmBack, 2_000)
                 return true
             }
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    /** 返回键的二次确认状态；2 秒内未再按则失效。 */
+    private val disarmBack = Runnable {
+        backArmed = false
+        hint?.visibility = View.GONE
     }
 
     override fun onPause() {
@@ -738,6 +786,8 @@ class NativePlayerActivity : Activity() {
     override fun onDestroy() {
         handler.removeCallbacks(tick)
         handler.removeCallbacks(hideHint)
+        handler.removeCallbacks(disarmBack)
+        handler.removeCallbacks(hideProgress)
         if (current?.get() === this) current = null
         (panel?.parent as? ViewGroup)?.removeView(panel)
         panel = null
