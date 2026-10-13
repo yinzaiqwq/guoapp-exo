@@ -562,8 +562,16 @@ func (manager *nativeDownloads) localPlan(drama string, index int) (nativePlan, 
 		_ = manager.saveLocked()
 		return nativePlan{}, true, errNativeLocalFile
 	}
-	return nativePlan{URL: path, Key: record.Key, Local: true, Quality: record.ActualQuality,
-		Qualities: []int{}, Headers: map[string]string{}, RouteCount: 1}, true, nil
+	// 本地播放同样需要弹幕标识：自建源的 vid 存在 Chapter.PageURL，
+	// 官方源则是 hongguo-cenc://<vid>。缺了它本地播放不会请求弹幕。
+	plan := nativePlan{URL: path, Key: record.Key, Local: true, Quality: record.ActualQuality,
+		Qualities: []int{}, Headers: map[string]string{}, RouteCount: 1}
+	if _, video, ok := hongguotvPlaybackIDs(Task{DramaID: drama, Chapter: record.Chapter}); ok {
+		plan.DanmakuID = video
+	} else if _, video, ok := hongguoPlaybackIDs(Task{DramaID: drama, Chapter: record.Chapter}); ok {
+		plan.DanmakuID = video
+	}
+	return plan, true, nil
 }
 
 func (manager *nativeDownloads) close() {
