@@ -13,6 +13,7 @@ import 'local_store.dart';
 import 'profiles_screen.dart';
 import 'app_build.dart';
 import 'sources_screen.dart';
+import 'server_downloads_screen.dart';
 import 'widgets.dart';
 import 'resource_settings_screen.dart';
 import 'lan_screen.dart';
@@ -150,6 +151,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: const Text('局域网自动同步追剧与推送播放'),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => openLanSync(context),
+              ),
+              ListTile(
+                key: const ValueKey('server-downloads'),
+                leading: const Icon(Icons.cloud_outlined),
+                title: const Text('服务器下载'),
+                subtitle: const Text('管理自建服务上已下载的剧集与占用空间'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => ServerDownloadsScreen(
+                      repository: widget.repository,
+                    ),
+                  ),
+                ),
               ),
               if (widget.repository.supportsSourceManagement)
                 ListTile(

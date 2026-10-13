@@ -452,6 +452,10 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "categories":
 		items, err := engine.nativeCategories(ctx, input.Source, input.Force)
 		return map[string]any{"items": items}, err
+	case "serverDownloads":
+		return engine.downloader.serverDownloadList(ctx)
+	case "deleteServerDownload":
+		return engine.downloader.serverDownloadDelete(ctx, input.Directory, input.Command)
 	case "sourceStatus":
 		return engine.sourceStatus(input.Source), nil
 	case "sourceJob":

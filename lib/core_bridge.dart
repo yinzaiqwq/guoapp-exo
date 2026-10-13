@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'models.dart';
 import 'danmaku_models.dart';
+import 'server_downloads.dart';
 import 'background_downloads.dart';
 import 'local_store.dart';
 import 'app_build.dart';
@@ -90,6 +91,16 @@ abstract class AppRepository {
     bool online = false,
   }) async => null;
   Future<void> cancelDanmaku() async {}
+
+  /// 服务器端已下载清单（自建红果TV 服务）。
+  Future<ServerDownloadList> serverDownloads() async =>
+      throw AppFailure('当前环境不支持服务器下载管理');
+
+  /// 删除服务器端已下载内容；[episode] 为空时删除整部。
+  Future<String> deleteServerDownload(
+    String folder, {
+    String episode = '',
+  }) async => throw AppFailure('当前环境不支持服务器下载管理');
   Future<DanmakuPage> danmaku(
     PlaybackPlan plan, {
     required int startMs,
@@ -326,6 +337,28 @@ class NativeRepository extends AppRepository {
       startMs: startMs,
       durationMs: durationMs,
     );
+  }
+
+  @override
+  Future<ServerDownloadList> serverDownloads() async {
+    _authorize('hongguotv');
+    return ServerDownloadList.fromJson(
+      await _read('server-downloads', {'action': 'serverDownloads'}),
+    );
+  }
+
+  @override
+  Future<String> deleteServerDownload(
+    String folder, {
+    String episode = '',
+  }) async {
+    _authorize('hongguotv');
+    final result = await _read('server-delete', {
+      'action': 'deleteServerDownload',
+      'directory': folder,
+      'command': episode,
+    });
+    return result['message'] as String? ?? '已删除';
   }
 
   @override
