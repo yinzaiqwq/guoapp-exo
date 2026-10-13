@@ -117,6 +117,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _closed = false;
   bool _acceptErrors = false;
   bool _foreground = true;
+  bool _windowsMaximizedBeforeFullscreen = false;
   bool _playIntent = true;
   bool _showControlsOnPlaybackReady = true;
   bool _pendingError = false;
@@ -1325,6 +1326,41 @@ class _PlayerScreenState extends State<PlayerScreen>
           _aspectRatio >= 1 &&
           MediaQuery.orientationOf(context) == Orientation.landscape);
 
+  /// Windows 下切换全屏。
+  ///
+  /// window_manager 0.5.2 的原生实现在窗口处于最大化状态时进入全屏会跳过
+  /// `SetAsFrameless()`，只摘掉 `WS_THICKFRAME` / `WS_MAXIMIZEBOX` 而保留
+  /// `WS_CAPTION`，标题栏于是留在画面上，客户区比屏幕少 22x56 像素，表现为
+  /// 「全屏铺不满屏幕」。这里先还原成普通窗口再进全屏，让插件走无边框分支；
+  /// 退出全屏后再恢复原来的最大化状态。
+  Future<void> _setWindowsFullscreen(bool fullscreen) async {
+    if (!fullscreen) {
+      await windowManager.setFullScreen(false);
+      if (_windowsMaximizedBeforeFullscreen) {
+        _windowsMaximizedBeforeFullscreen = false;
+        await windowManager.maximize();
+      }
+      return;
+    }
+    final maximized = await windowManager.isMaximized();
+    _windowsMaximizedBeforeFullscreen = maximized;
+    if (maximized) {
+      await windowManager.unmaximize();
+      // unmaximize 内部走 PostMessage(SC_RESTORE)，必须等窗口真正还原后再进
+      // 全屏，否则插件仍按「最大化」分支处理，标题栏不会被移除。
+      await _settleWindow(() async => !await windowManager.isMaximized());
+    }
+    await windowManager.setFullScreen(true);
+  }
+
+  /// 轮询等待窗口状态生效，最多约 600ms；超时即返回，不阻塞交互。
+  Future<void> _settleWindow(Future<bool> Function() ready) async {
+    for (var attempt = 0; attempt < 20; attempt++) {
+      if (await ready()) return;
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    }
+  }
+
   Future<void> _rotate() async {
     if (_rotating || _television) {
       return;
@@ -1340,7 +1376,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
     try {
       if (Platform.isWindows) {
-        await windowManager.setFullScreen(fullscreen);
+        await _setWindowsFullscreen(fullscreen);
       } else if (_mobile) {
         await (_orientationController?.setPlayback(
               this,
@@ -1676,7 +1712,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       }),
     );
     if (Platform.isWindows) {
-      unawaited(windowManager.setFullScreen(false));
+      unawaited(
+        _setWindowsFullscreen(false).catchError((Object _) {}),
+      );
     } else if (_mobile || _television && Platform.isAndroid) {
       unawaited(
         (_orientationController?.releasePlayback(this) ??
