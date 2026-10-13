@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_layout.dart';
+import 'media_init.dart';
 import 'app_orientation.dart';
 import 'app_theme.dart';
 import 'core_bridge.dart';
@@ -184,6 +185,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _danmaku = DanmakuController(widget.repository)
       ..setEnabled(_danmakuEnabled);
     widget.store.addListener(_accessChanged);
+    // libmpv 延迟到此处加载：启动阶段不再为它阻塞主线程
+    ensureMediaKit();
     _player =
         widget.playerFactory?.call() ??
         Player(

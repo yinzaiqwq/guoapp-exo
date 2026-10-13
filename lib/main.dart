@@ -32,7 +32,9 @@ Future<void> main(List<String> arguments) async {
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
   }
-  MediaKit.ensureInitialized();
+  // libmpv 的加载会阻塞主线程数秒（实测电视端 Skipped 401 frames，约 6.7 秒），
+  // 而它只在播放时才需要。改由 ensureMediaKit() 在首次进入播放页时加载，
+  // 启动阶段不再承担这部分开销。
   VideoEnhancementAssets.registerLicenses();
   if (Platform.isWindows && arguments.firstOrNull == '--package-smoke') {
     await runPackageSmoke(arguments);
