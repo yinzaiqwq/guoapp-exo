@@ -279,18 +279,23 @@ func hongguotvPlaybackIDs(task Task) (seriesID, videoID string, ok bool) {
 }
 
 // hongguotvDanmaku 取弹幕。自建服务已聚合红果官方弹幕与本地弹幕。
-func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID string, start, duration int64) (hongguoDanmakuPage, error) {
+func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID string, episode int, start, duration int64) (hongguoDanmakuPage, error) {
 	if err := ctx.Err(); err != nil {
 		return hongguoDanmakuPage{}, err
 	}
 	if !hongguoNumericID.MatchString(seriesID) || !hongguoNumericID.MatchString(videoID) {
 		return hongguoDanmakuPage{}, errors.New("弹幕请求参数无效")
 	}
-	// 服务端按集返回整集弹幕，start/duration 仅用于本地过滤
+	// 服务端按「剧集 + 集号」返回整集弹幕，start/duration 仅用于本地过滤。
+	// 集号必须用真实分集序号：原先按时间偏移推算，恒等于 1，
+	// 导致所有集都取到第 1 集的弹幕。
+	if episode < 1 {
+		episode = 1
+	}
 	values := url.Values{}
 	values.Set("series_id", seriesID)
 	values.Set("vid", videoID)
-	values.Set("ep", strconv.FormatInt(start/danmakuSegmentMS+1, 10))
+	values.Set("ep", strconv.Itoa(episode))
 	body, err := d.hongguotvRequest(ctx, "/danmaku", values)
 	if err != nil {
 		return hongguoDanmakuPage{}, err
@@ -324,5 +329,3 @@ func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID str
 	return page, nil
 }
 
-// danmakuSegmentMS 单次弹幕请求覆盖的时长；服务端按集返回，此处用整集区间。
-const danmakuSegmentMS = 24 * 60 * 60 * 1000

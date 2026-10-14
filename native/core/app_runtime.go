@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -791,6 +793,62 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 	return map[string]any{"drama": drama, "chapters": chapters, "warning": warning}, nil
 }
 
+// episodeNumber 解析播放任务的集号：优先用章节自带的 currentEpisode，
+// 缺失时退回按列表下标 +1（下标从 0 开始）。
+// registerLocalPlayback 为本地播放登记弹幕会话。
+//
+// 本地文件的 plan 由 nativeDownloads.localPlan 直接返回，不经过
+// nativeOpenPlayback，因此需要在这里补一次注册：弹幕接口按 session
+// 查表拿剧集与集号，没有登记就取不到弹幕。
+func (engine *nativeEngine) registerLocalPlayback(plan *nativePlan, input nativeInput) {
+	task := Task{DramaID: input.Drama.ID, Chapter: input.Chapter, Index: input.Index}
+	choice := nativePlaybackChoice{created: time.Now(), danmakuEpisode: episodeNumber(task)}
+	if series, video, ok := hongguotvPlaybackIDs(task); ok {
+		choice.danmakuSeries, choice.danmakuVideo = series, video
+		choice.danmakuSource = sourceHongguotv
+	} else if series, video, ok := hongguoPlaybackIDs(task); ok {
+		choice.danmakuSeries, choice.danmakuVideo = series, video
+		choice.danmakuSource = sourceHongguo
+	} else {
+		return
+	}
+	token := make([]byte, 24)
+	if _, err := rand.Read(token); err != nil {
+		return
+	}
+	plan.Session = hex.EncodeToString(token)
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if engine.playbacks == nil {
+		engine.playbacks = map[string]nativePlaybackChoice{}
+	}
+	for id, old := range engine.playbacks {
+		if time.Since(old.created) > 12*time.Hour {
+			delete(engine.playbacks, id)
+		}
+	}
+	// 与 nativeOpenPlayback 一致：最多保留 8 个会话
+	if len(engine.playbacks) >= 8 {
+		oldest := ""
+		for id, old := range engine.playbacks {
+			if oldest == "" || old.created.Before(engine.playbacks[oldest].created) {
+				oldest = id
+			}
+		}
+		delete(engine.playbacks, oldest)
+	}
+	engine.playbacks[plan.Session] = choice
+}
+
+func episodeNumber(task Task) int {
+	if raw := strings.TrimSpace(task.Chapter.EpisodeString(0)); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return task.Index + 1
+}
+
 func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput) (nativePlan, error) {
 	if _, _, valid := splitProviderDramaID(input.Drama.ID); !valid {
 		return nativePlan{}, errors.New("剧集信息无效")
@@ -798,6 +856,11 @@ func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput
 	if !input.Force && engine.downloads != nil {
 		if plan, found, err := engine.downloads.localPlan(input.Drama.ID, input.Index); found || err != nil {
 			if input.Action != "prepareHandoff" || !errors.Is(err, errNativeLocalFile) {
+				// 本地播放也要能取弹幕：注册会话并带上弹幕标识与集号。
+				// 缺了 session，Dart 侧取弹幕会被判为「本集暂不支持弹幕」。
+				if err == nil && plan.Local && plan.DanmakuID != "" {
+					engine.registerLocalPlayback(&plan, input)
+				}
 				return plan, err
 			}
 		}
@@ -808,6 +871,8 @@ func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput
 		return nativePlan{}, err
 	}
 	choice := nativePlaybackChoices(media, input.Quality)
+	// 用章节自带的集号（兼容字符串/整数/浮点），比按列表下标推算可靠
+	choice.danmakuEpisode = episodeNumber(task)
 	if series, video, valid := hongguoPlaybackIDs(task); valid {
 		choice.danmakuSeries, choice.danmakuVideo = series, video
 		choice.danmakuSource = sourceHongguo

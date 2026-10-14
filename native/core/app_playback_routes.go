@@ -13,6 +13,9 @@ type nativePlaybackChoice struct {
 	danmakuSeries string
 	danmakuVideo  string
 	danmakuSource string
+	// danmakuEpisode 是分集序号。自建服务按「剧集 + 集号」取弹幕，
+	// 缺了它任何一集都会拿到第 1 集的弹幕。
+	danmakuEpisode int
 	media         []providerMedia
 	index         int
 	qualities     []int

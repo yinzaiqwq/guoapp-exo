@@ -323,7 +323,9 @@ class NativeRepository extends AppRepository {
     required int durationMs,
   }) async {
     _authorize('hongguo');
-    if (plan.local || plan.session.isEmpty || plan.danmakuId.isEmpty) {
+    // 本地播放同样支持弹幕：服务端按「剧集 + 集号」返回整集弹幕，
+    // 与媒体来自网络还是本地无关。仅当缺少会话或弹幕标识时才不可用。
+    if (plan.session.isEmpty || plan.danmakuId.isEmpty) {
       throw AppFailure('本集暂不支持弹幕');
     }
     return DanmakuPage.fromJson(

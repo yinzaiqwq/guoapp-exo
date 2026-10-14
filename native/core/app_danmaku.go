@@ -19,11 +19,17 @@ func (engine *nativeEngine) nativeDanmaku(ctx context.Context, input nativeInput
 	if choice.danmakuSeries == "" || choice.danmakuVideo == "" {
 		return hongguoDanmakuPage{}, errors.New("本集暂不支持弹幕")
 	}
-	fetch := engine.downloader.hongguoDanmaku
 	if choice.danmakuSource == sourceHongguotv {
-		fetch = engine.downloader.hongguotvDanmaku
+		// 自建服务按集返回，需要真实集号
+		page, err := engine.downloader.hongguotvDanmaku(
+			ctx, choice.danmakuSeries, choice.danmakuVideo, choice.danmakuEpisode,
+			input.StartMS, input.DurationMS)
+		if err != nil {
+			return hongguoDanmakuPage{}, err
+		}
+		return page, ctx.Err()
 	}
-	page, err := fetch(ctx, choice.danmakuSeries, choice.danmakuVideo, input.StartMS, input.DurationMS)
+	page, err := engine.downloader.hongguoDanmaku(ctx, choice.danmakuSeries, choice.danmakuVideo, input.StartMS, input.DurationMS)
 	if err != nil {
 		return hongguoDanmakuPage{}, err
 	}
