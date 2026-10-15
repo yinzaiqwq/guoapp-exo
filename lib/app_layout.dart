@@ -6,7 +6,16 @@ import 'package:flutter/services.dart';
 
 export 'app_build.dart';
 
-const appVersion = '0.2.65';
+/// 运行时可读的应用版本，形如 `0.2.66+90`。
+///
+/// 原先这里是硬编码常量，与实际版本脱节（发布到 0.2.66+90 时仍写着
+/// 0.2.65），更新比对与关于页都会显示错误版本。改为在启动时从
+/// PackageInfo 读取后写入，读取前回退到占位值。
+String appVersion = unknownVersion;
+
+/// 版本未知时的占位值。构造函数的默认参数必须是常量，而运行时版本
+/// 读自 PackageInfo，因此这里提供一个常量占位，实际使用前会被覆盖。
+const unknownVersion = '0.0.0';
 
 ThemeData televisionTheme(ThemeData theme) {
   final colors = theme.colorScheme;
@@ -48,7 +57,7 @@ ThemeData televisionTheme(ThemeData theme) {
 }
 
 class AppDevice {
-  const AppDevice({this.television = false, this.version = appVersion});
+  const AppDevice({this.television = false, this.version = unknownVersion});
   final bool television;
   final String version;
   static const channel = MethodChannel('duanju/device');
@@ -203,7 +212,7 @@ class AppLayout extends InheritedWidget {
   const AppLayout({
     super.key,
     required this.television,
-    this.version = appVersion,
+    this.version = unknownVersion,
     required super.child,
   });
   final bool television;

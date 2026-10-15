@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_kit/media_kit.dart';
@@ -39,6 +40,14 @@ Future<void> main(List<String> arguments) async {
   if (Platform.isWindows && arguments.firstOrNull == '--package-smoke') {
     await runPackageSmoke(arguments);
     return;
+  }
+  // 读取真实版本号：关于页与更新比对都依赖它，不能再靠硬编码常量
+  try {
+    final info = await PackageInfo.fromPlatform();
+    final build = info.buildNumber.trim();
+    appVersion = build.isEmpty ? info.version : '${info.version}+$build';
+  } catch (_) {
+    // 读取失败时保留占位值，不影响启动
   }
   final device = await AppDevice.detect();
   runApp(AppBootstrap(device: device));
@@ -201,7 +210,7 @@ class DuanjuApp extends StatelessWidget {
     this.bootstrapError,
     this.onRetry,
     this.television = false,
-    this.version = appVersion,
+    this.version = unknownVersion,
     this.navigatorKey,
   });
   final AppRepository repository;

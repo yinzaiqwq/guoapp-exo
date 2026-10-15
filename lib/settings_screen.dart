@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,12 +9,14 @@ import 'package:path_provider/path_provider.dart';
 
 import 'core_bridge.dart';
 import 'app_theme.dart';
+import 'app_layout.dart';
 import 'background_downloads.dart';
 import 'local_store.dart';
 import 'profiles_screen.dart';
 import 'app_build.dart';
 import 'sources_screen.dart';
 import 'server_downloads_screen.dart';
+import 'windows_updater.dart';
 import 'widgets.dart';
 import 'resource_settings_screen.dart';
 import 'lan_screen.dart';
@@ -43,6 +46,140 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _busy = false;
   String? _message;
+
+/// 检查并应用 Windows 更新。
+  ///
+  /// 只处理本机平台：其他平台的入口本身不显示，这里再挡一次以防误调。
+  Future<void> _checkUpdate() async {
+    if (!Platform.isWindows || _busy) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    final updater = WindowsUpdater();
+    try {
+      final update = await updater.check();
+      if (!mounted) return;
+      if (update == null) {
+        setState(() => _message = '已是最新版本（$appVersion）');
+        return;
+      }
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('发现新版本 ${update.label}'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  [
+                    '当前版本：$appVersion',
+                    if (update.sizeLabel.isNotEmpty) '更新包大小：${update.sizeLabel}',
+                  ].join('\n'),
+                  style: const TextStyle(fontSize: 13),
+                ),
+                if (update.notes.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(update.notes, style: const TextStyle(fontSize: 13)),
+                ],
+                const SizedBox(height: 12),
+                const Text(
+                  '更新会替换程序文件并自动重启，追剧记录与设置不受影响。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('稍后'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('下载并更新'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      await _downloadAndApply(updater, update);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = error is HttpException ? error.message : '检查更新失败');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _downloadAndApply(
+    WindowsUpdater updater,
+    UpdateInfo update,
+  ) async {
+    final progress = ValueNotifier<double>(0);
+    if (!mounted) return;
+    // 下载期间用不可关闭的对话框反馈进度
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('正在下载更新'),
+          content: ValueListenableBuilder<double>(
+            valueListenable: progress,
+            builder: (context, value, _) => Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LinearProgressIndicator(value: value > 0 ? value : null),
+                const SizedBox(height: 12),
+                Text(
+                  value > 0
+                      ? '已完成 ${(value * 100).toStringAsFixed(0)}%'
+                      : '正在连接…',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    try {
+      final archive = await updater.download(
+        update,
+        onProgress: (received, total) {
+          if (total > 0) progress.value = received / total;
+        },
+      );
+      await updater.apply(archive);
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('更新已就绪'),
+          content: const Text('程序即将关闭以完成替换，随后会自动重新启动。'),
+          actions: [
+            FilledButton(
+              onPressed: () => exit(0),
+              child: const Text('立即重启'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      rethrow;
+    } finally {
+      progress.dispose();
+    }
+  }
 
   Future<void> _chooseTheme() async {
     final selected = await showDialog<String>(
@@ -152,6 +289,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => openLanSync(context),
               ),
+              if (Platform.isWindows)
+                ListTile(
+                  key: const ValueKey('check-update'),
+                  leading: const Icon(Icons.system_update_alt_rounded),
+                  title: const Text('检查更新'),
+                  subtitle: Text('当前版本 $appVersion'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: _busy ? null : () => unawaited(_checkUpdate()),
+                ),
               ListTile(
                 key: const ValueKey('server-downloads'),
                 leading: const Icon(Icons.cloud_outlined),
