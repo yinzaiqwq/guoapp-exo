@@ -325,23 +325,34 @@ void main() {
       ),
     );
     await tick(tester);
-    await tester.tap(find.byKey(const ValueKey('pause-1')));
+    await tester.tap(find.text('测试短剧').first);
+    await tick(tester);
+    Future<void> chooseEpisodeAction(String id, String label) async {
+      final card = find.byKey(ValueKey('download-task-$id'));
+      await tester.tap(
+        find.descendant(of: card, matching: find.byTooltip('分集操作')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label).last);
+      await tick(tester);
+    }
+
+    await chooseEpisodeAction('1', '暂停');
     await tick(tester);
     expect(repository.commands, ['pause:1']);
-    await tester.tap(find.byKey(const ValueKey('resume-1')));
-    await tick(tester);
+    await chooseEpisodeAction('1', '继续 / 重试');
     expect(repository.commands.last, 'resume:1');
     await tester.tap(find.text('已下载').first);
     await tick(tester);
     expect(find.byKey(const ValueKey('download-task-1')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('remove-2')));
+    await chooseEpisodeAction('2', '删除视频');
     await tester.pumpAndSettle();
     await tester.tap(find.text('保留'));
     await tester.pumpAndSettle();
     expect(repository.commands, isNot(contains('remove:2')));
-    await tester.tap(find.byKey(const ValueKey('remove-2')));
+    await chooseEpisodeAction('2', '删除视频');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('删除'));
+    await tester.tap(find.text('确认删除'));
     await tester.pumpAndSettle();
     expect(repository.commands.last, 'remove:2');
     expect(find.text('暂无符合条件的任务'), findsOneWidget);
@@ -494,6 +505,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await tester.pumpAndSettle();
+      focusRemote(tester, find.text('测试短剧').first);
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.pumpAndSettle();
       focusRemote(tester, find.byKey(const ValueKey('download-task-1')));
       await tester.pumpAndSettle();
       for (var i = 0; i < 12; i++) {
@@ -510,4 +524,54 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('download back first closes an empty focused search', (
+    tester,
+  ) async {
+    size(tester, const Size(960, 540));
+    final key = GlobalKey<DownloadsScreenState>();
+    await tester.pumpWidget(
+      televisionHost(
+        child: DownloadsScreen(
+          key: key,
+          repository: DownloadRepository(),
+          store: await makeStore(),
+        ),
+      ),
+    );
+    await tick(tester);
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, isNotNull);
+    expect(key.currentState!.handleBack(), isTrue);
+    await tester.pump();
+    expect(key.currentState!.handleBack(), isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('TV delete confirmation focuses the destructive action', (
+    tester,
+  ) async {
+    size(tester, const Size(960, 540));
+    final repository = DownloadRepository()
+      ..jobs = [DownloadRepository().job(1, 'completed')];
+    await tester.pumpWidget(
+      televisionHost(
+        child: DownloadsScreen(
+          repository: repository,
+          store: await makeStore(),
+        ),
+      ),
+    );
+    await tick(tester);
+    await tester.tap(find.byTooltip('测试短剧 · 合集操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('取消任务并删除视频'));
+    await tester.pumpAndSettle();
+    expect(find.text('确认删除'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tick(tester);
+    expect(repository.commands, contains('remove:1'));
+    expect(tester.takeException(), isNull);
+  });
 }

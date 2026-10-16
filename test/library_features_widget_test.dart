@@ -192,7 +192,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('相关推荐'), findsOneWidget);
+    expect(find.text('系列剧'), findsOneWidget);
     expect(find.byKey(ValueKey('series-${seasonOne.id}')), findsOneWidget);
     expect(find.byKey(ValueKey('series-${seasonTwo.id}')), findsOneWidget);
     final seasonTwoChip = find.byKey(ValueKey('series-${seasonTwo.id}'));
@@ -223,8 +223,9 @@ void main() {
       episodes: 10,
     );
     final store = await create();
-    await store.refreshDramas([seasonOne, seasonTwo]);
+    await store.refreshDrama(seasonOne);
     final repository = LibraryFeatureRepository()
+      ..cachedPages['hongguo'] = CatalogPage([seasonOne, seasonTwo])
       ..details[seasonOne.id] = LibraryFeatureRepository.makeDetail(
         seasonOne,
         12,
@@ -243,7 +244,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('相关推荐'), findsOneWidget);
+    expect(find.text('系列剧'), findsOneWidget);
     expect(find.byKey(ValueKey('series-${seasonTwo.id}')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

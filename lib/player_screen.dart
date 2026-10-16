@@ -1234,8 +1234,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     final seconds = _currentPosition;
     if (mpvHasContent) _player.pause();
-    // 弹幕不在打开播放器前等待：首次拉取需要服务器向上游取数（实测约 4 秒），
-    // 串行等待会让画面黑屏。改为先起播，取到后再推给原生层。
     final danmakuTicket = ++_nativeDanmakuGeneration;
     final NativePlaybackResult result;
     try {
@@ -1244,7 +1242,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       final nativeUrl = plan.local && !plan.url.contains('://')
           ? Uri.file(plan.url).toString()
           : plan.url;
-      result = await AppDevice.openNativePlayer(
+      final nativeResult = AppDevice.openNativePlayer(
         url: nativeUrl,
         title: widget.detail.drama.title,
         referer: plan.headers['Referer'] ?? plan.headers['referer'] ?? '',
@@ -1260,17 +1258,27 @@ class _PlayerScreenState extends State<PlayerScreen>
         speed: _speed,
         position: Duration(milliseconds: (seconds * 1000).round()),
       );
+      unawaited(_pushNativeDanmaku(plan, danmakuTicket));
+      result = await nativeResult;
+      if (_nativeDanmakuGeneration == danmakuTicket) {
+        _nativeDanmakuGeneration++;
+      }
     } on NativePlaybackFailure catch (error) {
+      if (_nativeDanmakuGeneration == danmakuTicket) {
+        _nativeDanmakuGeneration++;
+      }
       // 原生播放器自身的失败原因（解密、解码、网络）比通用提示更有意义
       if (mpvHasContent && !_closed && _foreground) _player.play();
       _notice(error.message);
       return;
     } catch (_) {
+      if (_nativeDanmakuGeneration == danmakuTicket) {
+        _nativeDanmakuGeneration++;
+      }
       // 其他异常恢复内置播放后交给上层处理，避免停留在已暂停状态
       if (mpvHasContent && !_closed && _foreground) _player.play();
       rethrow;
     }
-    unawaited(_pushNativeDanmaku(plan, danmakuTicket));
     if (!mounted || _closed) return;
     // 续播进度：无论走哪条路径，下次播放都从系统播放器返回的位置开始
     if (result.position > Duration.zero) {

@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:duanju_app/app_layout.dart';
 import 'package:duanju_app/local_store.dart';
 import 'package:duanju_app/main.dart';
 import 'package:duanju_app/models.dart';
+import 'package:duanju_app/ranking_models.dart';
+import 'package:duanju_app/rankings_screen.dart';
 import 'package:duanju_app/remote_widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +32,32 @@ class TelevisionRepository extends FixtureRepository {
       ),
     );
   }
+}
+
+class TelevisionRankingRepository extends FixtureRepository {
+  @override
+  Future<List<RankingBoard>> rankingBoards() async => const [
+    RankingBoard(id: 'hongguo-hot', source: 'hongguo', name: '总热播榜'),
+  ];
+
+  @override
+  Future<RankingPage> rankings(
+    String board, {
+    int page = 1,
+    bool force = false,
+  }) async => RankingPage(
+    items: [
+      for (var index = 0; index < 30; index++)
+        RankingItem(
+          index + 1,
+          Drama(
+            id: 'hongguo:ranking-${index + 1}',
+            source: 'hongguo',
+            title: '榜单短剧 ${index + 1}',
+          ),
+        ),
+    ],
+  );
 }
 
 void main() {
@@ -197,6 +227,77 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('TV search waits for pinyin suggestions before submitting', (
+    tester,
+  ) async {
+    size(tester, const Size(960, 540));
+    final suggestions = Completer<List<String>>();
+    String? submitted;
+    await tester.pumpWidget(
+      televisionHost(
+        child: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () async {
+                  submitted = await showDialog<String>(
+                    context: context,
+                    builder: (_) => TelevisionSearchDialog(
+                      initialValue: 'CXYY',
+                      title: '搜索短剧',
+                      suggestions: (_) => suggestions.future,
+                    ),
+                  );
+                },
+                child: const Text('打开搜索'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开搜索'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(RemoteButton, '搜索'));
+    await tester.pump();
+    expect(find.byType(TelevisionSearchDialog), findsOneWidget);
+    suggestions.complete(['丑小鸭']);
+    await tester.pumpAndSettle();
+    expect(submitted, '丑小鸭');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('TV ranking focus scrolls through rows that start offscreen', (
+    tester,
+  ) async {
+    size(tester, const Size(960, 540));
+    final store = await makeStore();
+    await tester.pumpWidget(
+      televisionHost(
+        child: RankingsScreen(
+          repository: TelevisionRankingRepository(),
+          store: store,
+          initialGroup: 'hongguo',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    focusRemote(
+      tester,
+      find.byKey(const ValueKey('rank-1-hongguo:ranking-1')),
+    );
+    await tester.pumpAndSettle();
+    for (var index = 0; index < 14; index++) {
+      await press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'remote-15-hongguo:ranking-15',
+    );
+    expect(find.text('榜单短剧 15'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('episode grid initially focuses an offscreen saved episode', (
     tester,

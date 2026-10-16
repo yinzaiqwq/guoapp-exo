@@ -467,7 +467,10 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
   late String _query = widget.initialValue;
   List<String> _results = [];
   bool _searching = false;
+  bool _submitting = false;
   Timer? _debounce;
+  int _suggestionGeneration = 0;
+  String _resultsQuery = '';
 
   static const _keys = [
     'A', 'B', 'C', 'D', 'E', 'F',
@@ -506,9 +509,12 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
 
   void _onClear() {
     if (_query.isNotEmpty) {
+      _suggestionGeneration++;
       setState(() {
         _query = '';
         _results = [];
+        _resultsQuery = '';
+        _searching = false;
       });
       _debounce?.cancel();
     }
@@ -518,7 +524,12 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
     _debounce?.cancel();
     final trimmed = _query.trim();
     if (trimmed.isEmpty) {
-      setState(() => _results = []);
+      _suggestionGeneration++;
+      setState(() {
+        _results = [];
+        _resultsQuery = '';
+        _searching = false;
+      });
       return;
     }
     _debounce = Timer(const Duration(milliseconds: 250), () {
@@ -528,27 +539,45 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
 
   Future<void> _fetchSuggestions(String text) async {
     if (widget.suggestions == null) return;
+    final generation = ++_suggestionGeneration;
     setState(() => _searching = true);
     try {
       final list = await widget.suggestions!(text);
-      if (mounted) {
+      if (mounted && generation == _suggestionGeneration) {
         setState(() {
           _results = list;
+          _resultsQuery = text;
           _searching = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _searching = false);
+      if (mounted && generation == _suggestionGeneration) {
+        setState(() => _searching = false);
+      }
     }
   }
 
-  void _submit(String text) {
+  Future<void> _submit(String text) async {
     var target = text.trim();
-    if (target.isEmpty) return;
-    // 若用户输入纯拼音头字母且已成功联想出短剧，直接点击搜索时优先取第一部短剧全名
-    if (_results.isNotEmpty && RegExp(r'^[a-zA-Z0-9]+$').hasMatch(target)) {
-      target = _results.first;
+    if (target.isEmpty || _submitting) return;
+    if (RegExp(r'^[a-zA-Z0-9]+$').hasMatch(target) &&
+        widget.suggestions != null) {
+      setState(() => _submitting = true);
+      if (_resultsQuery != target || _results.isEmpty) {
+        try {
+          final list = await widget.suggestions!(target);
+          if (!mounted) return;
+          if (list.isNotEmpty) {
+            _results = list;
+            _resultsQuery = target;
+          }
+        } catch (_) {}
+      }
+      if (_results.isNotEmpty && _resultsQuery == target) {
+        target = _results.first;
+      }
     }
+    if (!mounted) return;
     Navigator.pop(context, target);
   }
 
@@ -689,7 +718,9 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
                                 label: '搜索',
                                 icon: Icons.search_rounded,
                                 selected: true,
-                                onPressed: () => _submit(_query),
+                                onPressed: _submitting
+                                    ? null
+                                    : () => unawaited(_submit(_query)),
                               ),
                             ),
                           ],
@@ -733,7 +764,8 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
                                             RemoteButton(
                                               key: ValueKey('recent-$item'),
                                               label: item,
-                                              onPressed: () => _submit(item),
+                                              onPressed: () =>
+                                                  unawaited(_submit(item)),
                                             ),
                                         ],
                                       ),
@@ -754,7 +786,8 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
                                           key: ValueKey('suggest-$index'),
                                           label: item,
                                           icon: Icons.movie_outlined,
-                                          onPressed: () => _submit(item),
+                                          onPressed: () =>
+                                              unawaited(_submit(item)),
                                         );
                                       },
                                     )),

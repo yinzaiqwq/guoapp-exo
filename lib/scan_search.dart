@@ -33,12 +33,13 @@ class ScanSearchServer {
   /// 创建服务并开始监听。找不到可用的局域网地址时返回 null。
   static Future<ScanSearchServer?> start({
     Duration ttl = const Duration(minutes: 5),
+    InternetAddress? address,
   }) async {
-    final address = await _localAddress();
-    if (address == null) return null;
+    final bindAddress = address?.address ?? await _localAddress();
+    if (bindAddress == null) return null;
     final HttpServer server;
     try {
-      server = await HttpServer.bind(address, 0, shared: false);
+      server = await HttpServer.bind(bindAddress, 0, shared: false);
     } on SocketException {
       return null;
     }
@@ -139,7 +140,7 @@ class ScanSearchServer {
     }
     // Host 校验：挡住 DNS 重绑定（攻击者用域名指向本机）。
     // 不做完整字符串比对——手机浏览器与扫码 App 可能改写 Host，
-    // 只要主机部分是 IP 字面量且端口匹配即视为本机访问。
+    // 只要主机部分是电视绑定的 IP 字面量即视为本机访问。
     final host = request.headers.value(HttpHeaders.hostHeader);
     if (!_hostAllowed(host)) {
       await _respond(response, HttpStatus.forbidden, '来源不匹配');
@@ -199,35 +200,23 @@ class ScanSearchServer {
     await close();
   }
 
-  /// Host 是否可信：主机部分须为 IP 字面量且端口一致。
+  /// Host 是否可信：主机部分须为电视绑定的 IP 字面量。
   ///
   /// DNS 重绑定的前提是用域名指向本机，因此拒绝域名即可阻断；
   /// 不比对完整字符串，避免手机浏览器改写 Host 造成误拒。
   bool _hostAllowed(String? host) {
     if (host == null || host.isEmpty) return false;
-    var value = host.trim();
-    if (value.startsWith('[')) {
-      // IPv6：形如 [::1]:8000
-      final end = value.indexOf(']');
-      if (end < 0) return false;
-      value = value.substring(1, end);
-    } else {
-      final colon = value.lastIndexOf(':');
-      if (colon <= 0) return false;
-      final port = int.tryParse(value.substring(colon + 1));
-      if (port == null || port != _server.port) return false;
-      value = value.substring(0, colon);
-    }
-    // 只接受 IP 字面量：域名形式的 Host 是 DNS 重绑定的必要条件
-    return InternetAddress.tryParse(value) != null;
+    final uri = Uri.tryParse('http://${host.trim()}');
+    final address = uri == null ? null : InternetAddress.tryParse(uri.host);
+    return address != null && address.address == _server.address.address;
   }
 
-  /// Origin 是否可信：scheme 为 http 且主机是 IP 字面量、端口一致。
+  /// Origin 是否可信：scheme 为 http 且主机是电视绑定的 IP 字面量。
   bool _originAllowed(String origin) {
     final uri = Uri.tryParse(origin);
     if (uri == null || uri.scheme != 'http') return false;
-    if (uri.port != _server.port) return false;
-    return InternetAddress.tryParse(uri.host) != null;
+    final address = InternetAddress.tryParse(uri.host);
+    return address != null && address.address == _server.address.address;
   }
 
   Future<void> _respond(HttpResponse response, int status, String message) async {

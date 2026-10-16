@@ -283,6 +283,7 @@ class MainActivity : FlutterActivity() {
                                     }
                                     putExtra(NativePlayerActivity.EXTRA_POSITION_MS, positionMs)
                                 }
+                                NativePlayerActivity.beginSession()
                                 startActivityForResult(intent, nativePlayerRequest)
                             }
                         }

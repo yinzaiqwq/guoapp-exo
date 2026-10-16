@@ -48,6 +48,7 @@ class _DetailScreenState extends State<DetailScreen> {
   final _episodeAnchor = GlobalKey();
   final _detailScroll = ScrollController();
   bool _initialActionHandled = false;
+  bool _seriesLoading = false;
   late final int _profileEpoch;
   Widget? get _sourceDiagnostics => widget.repository.supportsSourceManagement
       ? SourceDiagnosticsButton(
@@ -116,6 +117,7 @@ class _DetailScreenState extends State<DetailScreen> {
       });
       widget.repository.catalogUpdates.publish(merged, retryCover: true);
       unawaited(_supplement(merged, generation));
+      unawaited(_discoverSeries(merged, generation));
       await saveUserChange(context, () => widget.store.refreshDrama(merged));
       if (mounted &&
           generation == _generation &&
@@ -172,6 +174,33 @@ class _DetailScreenState extends State<DetailScreen> {
       widget.repository.catalogUpdates.publish(updated);
       await saveUserChange(context, () => widget.store.refreshDrama(updated));
     } catch (_) {}
+  }
+
+  Future<void> _discoverSeries(Drama drama, int generation) async {
+    if (drama.source != SourceSite.hongguo.id) return;
+    final query = hongguoSeriesInfo(drama)?.baseTitle ?? drama.title.trim();
+    if (query.isEmpty) return;
+    setState(() => _seriesLoading = true);
+    try {
+      final result = await widget.repository.catalog(
+        SourceSite.hongguo.id,
+        query: query,
+      );
+      if (!mounted ||
+          generation != _generation ||
+          _profileEpoch != widget.store.profileEpoch) {
+        return;
+      }
+      await saveUserChange(
+        context,
+        () => widget.store.refreshDramas(result.items),
+      );
+    } catch (_) {
+    } finally {
+      if (mounted && generation == _generation) {
+        setState(() => _seriesLoading = false);
+      }
+    }
   }
 
   Future<void> _download() async {
@@ -781,7 +810,14 @@ class _DetailScreenState extends State<DetailScreen> {
       drama,
       widget.store.seriesDramasFor(drama),
     );
-    if (entries.isEmpty) return const SizedBox.shrink();
+    if (entries.isEmpty) {
+      return _seriesLoading
+          ? const Padding(
+              padding: EdgeInsets.fromLTRB(20, 10, 20, 8),
+              child: Text('正在查找系列剧…'),
+            )
+          : const SizedBox.shrink();
+    }
     final colors = Theme.of(context).colorScheme;
     final notices = widget.store.following(drama.id)?.seriesSeasons ?? const {};
     return Padding(
@@ -789,7 +825,7 @@ class _DetailScreenState extends State<DetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('相关推荐', style: Theme.of(context).textTheme.titleMedium),
+          Text('系列剧', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,

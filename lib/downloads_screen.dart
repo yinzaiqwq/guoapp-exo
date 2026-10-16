@@ -35,6 +35,7 @@ class DownloadsScreen extends StatefulWidget {
 class DownloadsScreenState extends State<DownloadsScreen> {
   Timer? _timer;
   final _search = TextEditingController();
+  final _searchFocus = FocusNode();
   final _selected = <String>{};
   final _expanded = <String>{};
   late final DownloadCollectionUpdater _updater;
@@ -63,6 +64,7 @@ class DownloadsScreenState extends State<DownloadsScreen> {
     _epoch = widget.store.profileEpoch;
     _updater = DownloadCollectionUpdater(widget.repository, widget.store)
       ..addListener(_changed);
+    _searchFocus.addListener(_changed);
     widget.store.addListener(_changed);
     _refresh();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
@@ -77,6 +79,8 @@ class DownloadsScreenState extends State<DownloadsScreen> {
     _stopBatch = true;
     _timer?.cancel();
     _search.dispose();
+    _searchFocus.removeListener(_changed);
+    _searchFocus.dispose();
     widget.store.removeListener(_changed);
     _updater.removeListener(_changed);
     _updater.dispose();
@@ -140,11 +144,11 @@ class DownloadsScreenState extends State<DownloadsScreen> {
           ),
           actions: [
             TextButton(
-              autofocus: AppLayout.isTelevision(context),
               onPressed: () => Navigator.pop(context, false),
               child: const Text('保留'),
             ),
             FilledButton(
+              autofocus: AppLayout.isTelevision(context),
               onPressed: () => Navigator.pop(context, true),
               child: const Text('确认删除'),
             ),
@@ -618,9 +622,10 @@ class DownloadsScreenState extends State<DownloadsScreen> {
   /// 内嵌在底部 Tab 时由外层首页调用此方法，从而避免外层直接 pop
   /// 导致退出应用。
   bool handleBack() {
-    // 与首页同理：先断开输入法连接，否则返回键会被 IME 截住反复消费。
-    FocusManager.instance.primaryFocus?.unfocus();
+    final searchFocused = _searchFocus.hasFocus;
+    _searchFocus.unfocus();
     DiaryService.add('[DL-Back] selecting=$_selecting q="${_search.text}"');
+    if (searchFocused) return true;
     if (_selecting) {
       setState(() {
         _selecting = false;
@@ -679,6 +684,7 @@ class DownloadsScreenState extends State<DownloadsScreen> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: TextField(
             controller: _search,
+            focusNode: _searchFocus,
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               hintText: '搜索剧名、站源或分类',
@@ -754,7 +760,7 @@ class DownloadsScreenState extends State<DownloadsScreen> {
     );
     if (widget.embedded) return body;
     return PopScope(
-      canPop: !_selecting && _search.text.isEmpty,
+      canPop: !_selecting && _search.text.isEmpty && !_searchFocus.hasFocus,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) _back();
       },

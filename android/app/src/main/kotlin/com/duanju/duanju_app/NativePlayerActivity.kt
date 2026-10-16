@@ -98,12 +98,36 @@ class NativePlayerActivity : Activity() {
         @Volatile
         private var current: java.lang.ref.WeakReference<NativePlayerActivity>? = null
 
+        @Volatile
+        private var pendingDanmaku: String? = null
+
+        @Volatile
+        private var acceptingDanmaku = false
+
+        @JvmStatic
+        fun beginSession() {
+            pendingDanmaku = null
+            acceptingDanmaku = true
+        }
+
         /** 向正在运行的播放器推送弹幕载荷；未运行时忽略。 */
         @JvmStatic
         fun pushDanmaku(payload: String?) {
             if (payload.isNullOrEmpty()) return
-            val activity = current?.get() ?: return
-            activity.runOnUiThread { activity.danmakuView?.load(payload) }
+            val activity = current?.get()
+            if (activity == null) {
+                if (acceptingDanmaku) pendingDanmaku = payload
+                return
+            }
+            activity.runOnUiThread {
+                val view = activity.danmakuView
+                if (view == null) {
+                    if (acceptingDanmaku) pendingDanmaku = payload
+                } else {
+                    view.load(payload)
+                    pendingDanmaku = null
+                }
+            }
         }
     }
 
@@ -300,7 +324,11 @@ class NativePlayerActivity : Activity() {
 
         setContentView(root)
 
-        intent.getStringExtra(EXTRA_DANMAKU)?.let { danmaku.load(it) }
+        val initialDanmaku = intent.getStringExtra(EXTRA_DANMAKU)
+            ?.takeIf { it.isNotEmpty() }
+            ?: pendingDanmaku
+        initialDanmaku?.let { danmaku.load(it) }
+        pendingDanmaku = null
         danmaku.setDanmakuEnabled(danmakuEnabled)
         menuBar.setDanmakuEnabled(danmakuEnabled)
 
@@ -789,6 +817,8 @@ class NativePlayerActivity : Activity() {
         handler.removeCallbacks(disarmBack)
         handler.removeCallbacks(hideProgress)
         if (current?.get() === this) current = null
+        acceptingDanmaku = false
+        pendingDanmaku = null
         (panel?.parent as? ViewGroup)?.removeView(panel)
         panel = null
         panelList = null
