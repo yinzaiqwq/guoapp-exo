@@ -191,7 +191,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         widget.playerFactory?.call() ??
         Player(
           configuration: PlayerConfiguration(
-            bufferSize: Platform.isAndroid ? 16 * 1024 * 1024 : 32 * 1024 * 1024,
+            bufferSize: Platform.isAndroid
+                ? 16 * 1024 * 1024
+                : 32 * 1024 * 1024,
             logLevel: MPVLogLevel.error,
           ),
         );
@@ -1036,8 +1038,14 @@ class _PlayerScreenState extends State<PlayerScreen>
               await platform.setProperty('vd-lavc-skiploopfilter', 'all');
               await platform.setProperty('vd-lavc-skipidct', 'all');
               await platform.setProperty('vd-lavc-threads', '2');
-              await platform.setProperty('demuxer-max-bytes', '${4 * 1024 * 1024}');
-              await platform.setProperty('demuxer-max-back-bytes', '${1 * 1024 * 1024}');
+              await platform.setProperty(
+                'demuxer-max-bytes',
+                '${4 * 1024 * 1024}',
+              );
+              await platform.setProperty(
+                'demuxer-max-back-bytes',
+                '${1 * 1024 * 1024}',
+              );
               await platform.setProperty('demuxer-readahead-secs', '5');
             } else {
               await platform.setProperty('hwdec', 'auto-safe');
@@ -1067,7 +1075,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         _plan = plan;
         installed = true;
         _acceptErrors = true;
-        DiaryService.add('[Play] 调用 _player.open: url=${plan.url}, headers=${plan.headers.keys.toList()}');
+        DiaryService.add(
+          '[Play] 调用 _player.open: url=${plan.url}, headers=${plan.headers.keys.toList()}',
+        );
         await _player.open(
           Media(
             plan.url,
@@ -1150,9 +1160,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 本地文件同样适用（原生侧用 DefaultDataSource，可读 file://）。
   /// 加密内容仍由内置播放器处理（media_kit 的 decryption_key 路径）。
   bool _shouldRouteToNative(PlaybackPlan plan) =>
-      Platform.isAndroid &&
-      plan.decryptionKey.isEmpty &&
-      plan.url.isNotEmpty;
+      Platform.isAndroid && plan.decryptionKey.isEmpty && plan.url.isNotEmpty;
 
   /// 加密内容或本地播放时不提供系统播放器入口。
   ///
@@ -1166,13 +1174,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       _plan!.local != true &&
       Platform.isAndroid;
 
-
   /// 为原生播放器预取弹幕并推送到正在运行的原生层。
   ///
   /// 首次拉取需要服务器向上游取数（实测约 4 秒），因此放在起播之后异步进行，
   /// 不阻塞画面。取到后通过设备通道推给原生 Activity；若播放器已退出则忽略。
   Future<void> _pushNativeDanmaku(PlaybackPlan plan, int ticket) async {
-    if (!_danmakuEnabled || plan.local || plan.session.isEmpty) return;
+    // 本地播放同样有弹幕：服务端按「剧集 + 集号」返回，与媒体来源无关。
+    // 之前这里排除了 plan.local，导致下载的剧集永远推不出弹幕。
+    if (!_danmakuEnabled || plan.session.isEmpty) return;
     if (plan.danmakuId.isEmpty) return;
     final duration = _player.state.duration.inMilliseconds;
     final total = duration > 0 ? duration : 30 * 60 * 1000;
@@ -1239,8 +1248,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         url: nativeUrl,
         title: widget.detail.drama.title,
         referer: plan.headers['Referer'] ?? plan.headers['referer'] ?? '',
+        // 传「第 N 集」而不是 episode.title：红果的 title 是剧情简介，
+        // 直接显示会变成一长串文案，看不出集号。
         episodes: [
-          for (final episode in widget.detail.episodes) episode.title,
+          for (final episode in widget.detail.episodes) '第 ${episode.number} 集',
         ],
         episodeIndex: _index,
         danmaku: '',
@@ -1269,9 +1280,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final speed = result.speed;
     if (speed != null && speed > 0 && speed != _speed) {
       _speed = speed;
-      unawaited(
-        _setPreferences(_preferences.copyWith(speed: speed)),
-      );
+      unawaited(_setPreferences(_preferences.copyWith(speed: speed)));
     }
     // 用户在原生清晰度面板中切换了档位：重新取流后回到原进度
     final quality = result.quality;
@@ -1715,9 +1724,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       }),
     );
     if (Platform.isWindows) {
-      unawaited(
-        _setWindowsFullscreen(false).catchError((Object _) {}),
-      );
+      unawaited(_setWindowsFullscreen(false).catchError((Object _) {}));
     } else if (_mobile || _television && Platform.isAndroid) {
       unawaited(
         (_orientationController?.releasePlayback(this) ??
@@ -2007,7 +2014,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         FilledButton.tonalIcon(
-                          onPressed: () => DiaryService.showDiaryDialog(context),
+                          onPressed: () =>
+                              DiaryService.showDiaryDialog(context),
                           icon: const Icon(Icons.receipt_long_rounded),
                           label: const Text('查看播放日记'),
                         ),
@@ -2018,8 +2026,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                             label: const Text('改为在线播放'),
                           )
                         else if (!_localFailure &&
-                              !widget.localOnly &&
-                              widget.repository.supportsSourceManagement)
+                            !widget.localOnly &&
+                            widget.repository.supportsSourceManagement)
                           SourceDiagnosticsButton(
                             repository: widget.repository,
                             store: widget.store,
