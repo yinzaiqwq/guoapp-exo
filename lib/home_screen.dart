@@ -18,6 +18,7 @@ import 'playback_launch_screen.dart';
 import 'downloads_screen.dart';
 import 'local_store.dart';
 import 'lan_screen.dart';
+import 'diary_service.dart';
 import 'models.dart';
 import 'remote_widgets.dart';
 import 'widgets.dart';
@@ -56,6 +57,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   int _generation = 0;
   int _tab = 0;
+
+  /// 下载页（底部 Tab 内嵌）的 state，用于把返回键先交给它处理。
+  final _downloadsKey = GlobalKey<DownloadsScreenState>();
+
   String _submittedQuery = '';
   final _categorySelections = <String, String>{};
   late final CatalogBrowser _browser;
@@ -409,11 +414,24 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// 电视端返回键：按「内层到外层」逐级退出。
-  ///
-  /// 返回 true 表示本次返回已被消费（不退出应用）；false 表示已在最外层，
-  /// 交给系统处理。原实现只清关键词而不关搜索栏，且最外层不做任何事，
-  /// 于是出现「退不出去」与「一按就退出」两种相反的表现。
+  void _handleBack() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    DiaryService.add(
+      '[Back] tab=$_tab sel=$_selectionMode searchVis=$_searchVisible q="${_search.text}"',
+    );
+    if (_tab == 3 && (_downloadsKey.currentState?.handleBack() ?? false)) {
+      DiaryService.add('[Back] 下载页已消费');
+      return;
+    }
+    if (_tab != 0) {
+      DiaryService.add('[Back] 切回首页');
+      setState(() => _tab = 0);
+      return;
+    }
+    final consumed = _televisionBack();
+    DiaryService.add('[Back] televisionBack=$consumed');
+  }
+
   bool _televisionBack() {
     if (_selectionMode) {
       _cancelSelection();
@@ -1110,6 +1128,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             : _catalog(selectionInBody: desktop || television)
                       : _tab == 3
                       ? DownloadsScreen(
+                          key: _downloadsKey,
                           repository: widget.repository,
                           store: widget.store,
                           embedded: true,
@@ -1163,23 +1182,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
         );
-        if (!television && !_selectionMode) return scaffold;
         return PopScope(
-          // 搜索栏展开或有选中项时禁止直接 pop，先由 _televisionBack 逐级收起
           canPop:
+              _tab == 0 &&
               !_selectionMode &&
               !_searchVisible &&
-              _search.text.isEmpty &&
-              (!television || _tab == 0),
+              _search.text.isEmpty,
           onPopInvokedWithResult: (didPop, result) {
-            if (!didPop) _televisionBack();
+            DiaryService.add('[PopScope] didPop=$didPop');
+            if (!didPop) _handleBack();
           },
           child: CallbackShortcuts(
             bindings: {
-              const SingleActivator(LogicalKeyboardKey.escape): () =>
-                  Navigator.of(context).maybePop(),
-              const SingleActivator(LogicalKeyboardKey.goBack): () =>
-                  Navigator.of(context).maybePop(),
+              const SingleActivator(LogicalKeyboardKey.escape): _handleBack,
+              const SingleActivator(LogicalKeyboardKey.goBack): _handleBack,
             },
             child: scaffold,
           ),

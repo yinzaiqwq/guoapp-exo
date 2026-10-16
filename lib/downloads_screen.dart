@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'app_layout.dart';
 import 'core_bridge.dart';
+import 'diary_service.dart';
 import 'download_collections.dart';
 import 'local_store.dart';
 import 'local_media_screen.dart';
@@ -28,10 +29,10 @@ class DownloadsScreen extends StatefulWidget {
   @visibleForTesting
   final Widget Function(DramaDetail, int, double)? playerBuilder;
   @override
-  State<DownloadsScreen> createState() => _DownloadsScreenState();
+  DownloadsScreenState createState() => DownloadsScreenState();
 }
 
-class _DownloadsScreenState extends State<DownloadsScreen> {
+class DownloadsScreenState extends State<DownloadsScreen> {
   Timer? _timer;
   final _search = TextEditingController();
   final _selected = <String>{};
@@ -611,6 +612,35 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     ),
   );
 
+  /// 处理返回键：先退出多选/搜索。
+  ///
+  /// 返回 true 表示本次返回已被消费（调用方不应再处理）。
+  /// 内嵌在底部 Tab 时由外层首页调用此方法，从而避免外层直接 pop
+  /// 导致退出应用。
+  bool handleBack() {
+    // 与首页同理：先断开输入法连接，否则返回键会被 IME 截住反复消费。
+    FocusManager.instance.primaryFocus?.unfocus();
+    DiaryService.add('[DL-Back] selecting=$_selecting q="${_search.text}"');
+    if (_selecting) {
+      setState(() {
+        _selecting = false;
+        _selected.clear();
+      });
+      return true;
+    }
+    if (_search.text.isNotEmpty) {
+      setState(_search.clear);
+      return true;
+    }
+    return false;
+  }
+
+  /// 未内嵌时的返回：交给 handleBack，未消费则关闭页面。
+  void _back() {
+    if (handleBack()) return;
+    Navigator.of(context).maybePop();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_allowed) {
@@ -723,16 +753,20 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       ],
     );
     if (widget.embedded) return body;
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            Navigator.of(context).maybePop(),
-        const SingleActivator(LogicalKeyboardKey.goBack): () =>
-            Navigator.of(context).maybePop(),
+    return PopScope(
+      canPop: !_selecting && _search.text.isEmpty,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _back();
       },
-      child: Scaffold(
-        appBar: AppBar(title: Text(title), actions: actions),
-        body: SafeArea(top: false, child: body),
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): _back,
+          const SingleActivator(LogicalKeyboardKey.goBack): _back,
+        },
+        child: Scaffold(
+          appBar: AppBar(title: Text(title), actions: actions),
+          body: SafeArea(top: false, child: body),
+        ),
       ),
     );
   }
