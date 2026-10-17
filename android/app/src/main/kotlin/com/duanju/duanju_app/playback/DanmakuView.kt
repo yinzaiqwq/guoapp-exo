@@ -25,6 +25,9 @@ internal class DanmakuView(context: Context) : View(context) {
     private data class Item(val timeMs: Long, val text: String)
 
     private var items: List<Item> = emptyList()
+    private data class Placement(val item: Item, val lane: Int, val width: Float)
+    private var placements: List<Placement> = emptyList()
+    private var layoutDirty = true
     private var enabled = true
     private var areaFraction = 0.33f
     private var fontSize = 34f
@@ -79,6 +82,7 @@ internal class DanmakuView(context: Context) : View(context) {
         }
         parsed.sortBy { it.timeMs }
         items = parsed
+        layoutDirty = true
         restart()
     }
 
@@ -104,7 +108,26 @@ internal class DanmakuView(context: Context) : View(context) {
         paint.setShadowLayer(3f, 1.5f, 1.5f, Color.argb((200 * opacity).toInt(), 0, 0, 0))
         strokePaint.textSize = fontSize
         strokePaint.alpha = (190 * opacity).toInt()
+        layoutDirty = true
         invalidate()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        layoutDirty = true
+    }
+
+    private fun updateLayout() {
+        if (!layoutDirty) return
+        val lanes = ((height * areaFraction - topMargin) / (fontSize + 12f)).toInt().coerceAtLeast(1)
+        val scheduler = DanmakuLanes(width.toFloat(), lanes, travelMs)
+        placements = items.mapNotNull { item ->
+            if (blockedWords.any { item.text.contains(it, ignoreCase = true) }) return@mapNotNull null
+            val textWidth = paint.measureText(item.text)
+            val lane = scheduler.place(item.timeMs, textWidth) ?: return@mapNotNull null
+            Placement(item, lane, textWidth)
+        }
+        layoutDirty = false
     }
 
     /**
@@ -147,29 +170,29 @@ internal class DanmakuView(context: Context) : View(context) {
         }
 
         val now = currentPositionMs()
+        updateLayout()
         // 只处理 [now - travelMs, now] 窗口内的条目：早于窗口的已飞出屏幕，
         // 晚于 now 的还没进场。二分定位窗口起点。
         val windowStart = now - travelMs.toLong()
         var low = 0
-        var high = items.size
+        var high = placements.size
         while (low < high) {
             val middle = (low + high) ushr 1
-            if (items[middle].timeMs < windowStart) low = middle + 1 else high = middle
+            if (placements[middle].item.timeMs < windowStart) low = middle + 1 else high = middle
         }
 
         val laneHeight = fontSize + 12f
-        val lanes = ((height * areaFraction - topMargin) / laneHeight).toInt().coerceAtLeast(1)
         var drawn = 0
-        for (index in low until items.size) {
-            val item = items[index]
-            if (blockedWords.any { item.text.contains(it, ignoreCase = true) }) continue
+        for (index in low until placements.size) {
+            val placement = placements[index]
+            val item = placement.item
             val elapsed = now - item.timeMs
             if (elapsed < 0) break
             if (elapsed > travelMs.toLong()) continue
-            val textWidth = paint.measureText(item.text)
+            val textWidth = placement.width
             val x = width - (width + textWidth) * (elapsed / travelMs)
             if (x > width || x + textWidth < 0f) continue
-            val lane = index % lanes
+            val lane = placement.lane
             val y = topMargin + lane * laneHeight + fontSize
             canvas.drawText(item.text, x, y, strokePaint)
             canvas.drawText(item.text, x, y, paint)

@@ -576,8 +576,18 @@ void main() {
       const ValueKey('download-remove-collection-hongguo:100'),
     );
     expect(deleteButton, findsOneWidget);
-    Focus.of(tester.element(find.text('删除整部'))).requestFocus();
+    for (var i = 0; i < 20; i++) {
+      if (Focus.of(tester.element(find.text('删除整部'))).hasFocus) break;
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+    }
+    expect(Focus.of(tester.element(find.text('删除整部'))).hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pump();
+    expect(Focus.of(tester.element(find.text('删除整部'))).hasFocus, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(Focus.of(tester.element(find.text('删除整部'))).hasFocus, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.select);
     await tester.pumpAndSettle();
     expect(find.textContaining('共 2 项'), findsOneWidget);

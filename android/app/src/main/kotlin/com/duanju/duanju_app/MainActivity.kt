@@ -29,6 +29,7 @@ class MainActivity : FlutterActivity() {
     private var headroomReadAt = 0L
     private var thermalHeadroom: Double? = null
     private var deviceChannel: MethodChannel? = null
+    private var progressChannel: MethodChannel? = null
     private var televisionMode = false
     private var nativePlayerResult: MethodChannel.Result? = null
     private val nativePlayerRequest = 0x4E50
@@ -119,10 +120,12 @@ class MainActivity : FlutterActivity() {
         if (requestCode != nativePlayerRequest) return
         val pending = nativePlayerResult ?: return
         nativePlayerResult = null
+        NativePlayerActivity.progressListener = null
         when (resultCode) {
             RESULT_OK -> {
                 val payload = mutableMapOf<String, Any?>(
                     "positionMs" to (data?.getLongExtra(NativePlayerActivity.RESULT_POSITION_MS, 0L) ?: 0L),
+                    "durationMs" to (data?.getLongExtra(NativePlayerActivity.RESULT_DURATION_MS, 0L) ?: 0L),
                     "completed" to (data?.getBooleanExtra(NativePlayerActivity.RESULT_COMPLETED, false) ?: false),
                 )
                 // 选集中切换分集时回传目标下标；未切换则不带该键
@@ -157,6 +160,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        progressChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "duanju/native_progress")
         deviceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "duanju/device")
             .also { channel ->
                 channel.setMethodCallHandler { call, result ->
@@ -260,6 +264,12 @@ class MainActivity : FlutterActivity() {
                                 result.error("busy", "已有原生播放器在运行", null)
                             } else {
                                 nativePlayerResult = result
+                                NativePlayerActivity.progressListener = { position, duration ->
+                                    progressChannel?.invokeMethod("nativePlaybackProgress", mapOf(
+                                        "positionMs" to position,
+                                        "durationMs" to duration,
+                                    ))
+                                }
                                 val intent = Intent(this, NativePlayerActivity::class.java).apply {
                                     putExtra(NativePlayerActivity.EXTRA_URL, url)
                                     putExtra(NativePlayerActivity.EXTRA_TITLE, title)
@@ -369,6 +379,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        NativePlayerActivity.progressListener = null
+        progressChannel = null
         deviceChannel?.setMethodCallHandler(null)
         deviceChannel = null
         super.cleanUpFlutterEngine(flutterEngine)

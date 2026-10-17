@@ -57,6 +57,7 @@ ThemeData televisionTheme(ThemeData theme) {
 }
 
 class AppDevice {
+  static bool _nativePlayerActive = false;
   const AppDevice({this.television = false, this.version = unknownVersion});
   final bool television;
   final String version;
@@ -103,7 +104,9 @@ class AppDevice {
   static Future<void> setBrightness(double brightness) async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     try {
-      await channel.invokeMethod('setBrightness', {'brightness': brightness.clamp(0.01, 1.0)});
+      await channel.invokeMethod('setBrightness', {
+        'brightness': brightness.clamp(0.01, 1.0),
+      });
     } catch (_) {}
   }
 
@@ -150,33 +153,63 @@ class AppDevice {
     int quality = 0,
     double speed = 1,
     Duration position = Duration.zero,
+    Future<void> Function(Duration position, Duration duration)? onProgress,
   }) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
       throw const NativePlaybackFailure('原生播放器仅支持 Android');
     }
-    final dynamic data = await channel.invokeMethod<dynamic>('openNativePlayer', {
-      'url': url,
-      'title': title,
-      'referer': referer,
-      'key': decryptionKey,
-      'episodes': episodes,
-      'episodeIndex': episodeIndex,
-      'danmaku': danmaku,
-      'qualities': qualities,
-      'quality': quality,
-      'speed': speed,
-      'positionMs': position.inMilliseconds,
+    if (_nativePlayerActive) {
+      throw const NativePlaybackFailure('已有原生播放器在运行');
+    }
+    _nativePlayerActive = true;
+    const progressChannel = MethodChannel('duanju/native_progress');
+    progressChannel.setMethodCallHandler((call) async {
+      if (call.method != 'nativePlaybackProgress' || call.arguments is! Map) {
+        return;
+      }
+      final data = call.arguments as Map;
+      await onProgress?.call(
+        Duration(milliseconds: (data['positionMs'] as num?)?.toInt() ?? 0),
+        Duration(milliseconds: (data['durationMs'] as num?)?.toInt() ?? 0),
+      );
     });
+    final dynamic data;
+    try {
+      data = await channel.invokeMethod<dynamic>('openNativePlayer', {
+        'url': url,
+        'title': title,
+        'referer': referer,
+        'key': decryptionKey,
+        'episodes': episodes,
+        'episodeIndex': episodeIndex,
+        'danmaku': danmaku,
+        'qualities': qualities,
+        'quality': quality,
+        'speed': speed,
+        'positionMs': position.inMilliseconds,
+      });
+    } finally {
+      progressChannel.setMethodCallHandler(null);
+      _nativePlayerActive = false;
+    }
     if (data is Map) {
       return NativePlaybackResult(
-        position: Duration(milliseconds: (data['positionMs'] as num?)?.toInt() ?? 0),
+        position: Duration(
+          milliseconds: (data['positionMs'] as num?)?.toInt() ?? 0,
+        ),
+        duration: Duration(
+          milliseconds: (data['durationMs'] as num?)?.toInt() ?? 0,
+        ),
         completed: data['completed'] == true,
         episodeIndex: (data['episodeIndex'] as num?)?.toInt(),
         quality: (data['quality'] as num?)?.toInt(),
         speed: (data['speed'] as num?)?.toDouble(),
       );
     }
-    return const NativePlaybackResult(position: Duration.zero, completed: false);
+    return const NativePlaybackResult(
+      position: Duration.zero,
+      completed: false,
+    );
   }
 }
 
@@ -184,11 +217,13 @@ class NativePlaybackResult {
   const NativePlaybackResult({
     required this.position,
     required this.completed,
+    this.duration = Duration.zero,
     this.episodeIndex,
     this.quality,
     this.speed,
   });
   final Duration position;
+  final Duration duration;
   final bool completed;
 
   /// 用户在原生选集中切换的分集下标；未切换时为 null。

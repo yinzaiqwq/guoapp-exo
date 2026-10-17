@@ -53,6 +53,7 @@ class PlayerScreen extends StatefulWidget {
     this.videoBuilder,
     this.handoff,
     this.planResolver,
+    this.nativePlayback,
   });
   final DramaDetail detail;
   final int initialIndex;
@@ -68,6 +69,8 @@ class PlayerScreen extends StatefulWidget {
   final Player Function()? playerFactory;
   @visibleForTesting
   final Widget Function(Widget controls)? videoBuilder;
+  @visibleForTesting
+  final bool? nativePlayback;
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
@@ -188,7 +191,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       ..setEnabled(_danmakuEnabled);
     widget.store.addListener(_accessChanged);
     // libmpv 延迟到此处加载：启动阶段不再为它阻塞主线程
-    ensureMediaKit();
+    if (widget.playerFactory == null) ensureMediaKit();
     _player =
         widget.playerFactory?.call() ??
         Player(
@@ -853,25 +856,37 @@ class _PlayerScreenState extends State<PlayerScreen>
     _syncDanmaku();
   }
 
-  Future<void> _saveProgress({bool flush = false}) async {
-    if (_openedIndex < 0 || widget.store.profileEpoch != _profileEpoch) {
+  bool _nativePlaybackActive = false;
+
+  Future<void> _saveProgress({
+    bool flush = false,
+    int? nativeIndex,
+    Duration? nativePosition,
+    Duration? nativeDuration,
+  }) async {
+    final index = nativeIndex ?? _openedIndex;
+    if (index < 0 ||
+        (_nativePlaybackActive && nativeIndex == null) ||
+        widget.store.profileEpoch != _profileEpoch) {
       return;
     }
-    final position = _player.state.position.inMilliseconds / 1000;
-    final duration = _player.state.duration.inMilliseconds / 1000;
+    final position =
+        (nativePosition ?? _player.state.position).inMilliseconds / 1000;
+    final duration =
+        (nativeDuration ?? _player.state.duration).inMilliseconds / 1000;
     if (position < .1) {
       return;
     }
     final store = widget.store;
     final progressKey =
-        '${widget.mediaId ?? widget.detail.drama.id}:$_openedIndex:$position:$duration';
+        '${widget.mediaId ?? widget.detail.drama.id}:$index:$position:$duration';
     if (_savedProgressKey == progressKey && _saveWarning == null) {
       if (flush && widget.mediaId == null) LanController.current?.flush();
       return;
     }
     final entry = WatchEntry(
       drama: widget.repository.catalogUpdates.current(widget.detail.drama),
-      episode: widget.detail.episodes[_openedIndex].number,
+      episode: widget.detail.episodes[index].number,
       position: position,
       duration: duration,
       updatedAt: DateTime.now(),
@@ -1165,7 +1180,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 本地文件同样适用（原生侧用 DefaultDataSource，可读 file://）。
   /// 加密内容仍由内置播放器处理（media_kit 的 decryption_key 路径）。
   bool _shouldRouteToNative(PlaybackPlan plan) =>
-      Platform.isAndroid && plan.decryptionKey.isEmpty && plan.url.isNotEmpty;
+      (widget.nativePlayback ?? Platform.isAndroid) &&
+      plan.decryptionKey.isEmpty &&
+      plan.url.isNotEmpty;
 
   /// 加密内容或本地播放时不提供系统播放器入口。
   ///
@@ -1238,6 +1255,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       throw AppFailure('当前内容由内置播放器播放，暂不支持系统播放器');
     }
     final seconds = _currentPosition;
+    final nativeIndex = _index;
+    _nativePlaybackActive = true;
     if (mpvHasContent) _player.pause();
     final danmakuTicket = ++_nativeDanmakuGeneration;
     final NativePlaybackResult result;
@@ -1262,9 +1281,23 @@ class _PlayerScreenState extends State<PlayerScreen>
         quality: plan.quality,
         speed: _speed,
         position: Duration(milliseconds: (seconds * 1000).round()),
+        onProgress: (position, duration) async {
+          if (_nativeDanmakuGeneration != danmakuTicket || _closed) return;
+          await _saveProgress(
+            nativeIndex: nativeIndex,
+            nativePosition: position,
+            nativeDuration: duration,
+          );
+        },
       );
       unawaited(_pushNativeDanmaku(plan, danmakuTicket));
       result = await nativeResult;
+      await _saveProgress(
+        flush: true,
+        nativeIndex: nativeIndex,
+        nativePosition: result.position,
+        nativeDuration: result.duration,
+      );
       if (_nativeDanmakuGeneration == danmakuTicket) {
         _nativeDanmakuGeneration++;
       }
@@ -1283,6 +1316,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       // 其他异常恢复内置播放后交给上层处理，避免停留在已暂停状态
       if (mpvHasContent && !_closed && _foreground) _player.play();
       rethrow;
+    } finally {
+      _nativePlaybackActive = false;
     }
     if (!mounted || _closed) return;
     // 续播进度：无论走哪条路径，下次播放都从系统播放器返回的位置开始

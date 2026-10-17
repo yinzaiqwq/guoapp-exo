@@ -77,6 +77,8 @@ class NativePlayerActivity : Activity() {
         const val EXTRA_QUALITY = "quality"
 
         const val RESULT_POSITION_MS = "positionMs"
+        const val RESULT_DURATION_MS = "durationMs"
+        var progressListener: ((Long, Long) -> Unit)? = null
         const val RESULT_COMPLETED = "completed"
 
         /** 用户在选集中切换了分集，回传目标下标。 */
@@ -284,6 +286,17 @@ class NativePlayerActivity : Activity() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private var lastProgressAt = 0L
+
+    private fun reportProgress(force: Boolean = false) {
+        val exo = player ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (exo.duration <= 0 || exo.currentPosition < 100) return
+        if (!force && now - lastProgressAt < 5_000L) return
+        lastProgressAt = now
+        progressListener?.invoke(exo.currentPosition, exo.duration)
+    }
+
     private val tick = object : Runnable {
         override fun run() {
             val exo = player
@@ -292,6 +305,7 @@ class NativePlayerActivity : Activity() {
                 // 传入播放状态：暂停时弹幕停在原位，不随墙钟继续漂移
                 danmakuView?.setPosition(position, exo.isPlaying)
                 progressBar?.update(position, exo.duration.coerceAtLeast(0), exo.bufferedPosition)
+                reportProgress()
             }
             handler.postDelayed(this, 200)
         }
@@ -711,6 +725,7 @@ class NativePlayerActivity : Activity() {
             RESULT_OK,
             Intent().apply {
                 putExtra(RESULT_POSITION_MS, player?.currentPosition ?: 0L)
+                putExtra(RESULT_DURATION_MS, player?.duration?.coerceAtLeast(0L) ?: 0L)
                 putExtra(RESULT_COMPLETED, false)
                 putExtra(RESULT_QUALITY, value)
                 putExtra(RESULT_SPEED, playbackSpeed)
@@ -735,6 +750,7 @@ class NativePlayerActivity : Activity() {
             RESULT_OK,
             Intent().apply {
                 putExtra(RESULT_POSITION_MS, player?.currentPosition ?: 0L)
+                putExtra(RESULT_DURATION_MS, player?.duration?.coerceAtLeast(0L) ?: 0L)
                 putExtra(RESULT_COMPLETED, false)
                 putExtra(RESULT_EPISODE_INDEX, index)
                 putExtra(RESULT_SPEED, playbackSpeed)
@@ -776,6 +792,7 @@ class NativePlayerActivity : Activity() {
     private fun finishWithResult() {
         val data = Intent().apply {
             putExtra(RESULT_POSITION_MS, player?.currentPosition ?: 0L)
+            putExtra(RESULT_DURATION_MS, player?.duration?.coerceAtLeast(0L) ?: 0L)
             putExtra(RESULT_COMPLETED, finished)
             putExtra(RESULT_SPEED, playbackSpeed)
         }
@@ -934,6 +951,7 @@ class NativePlayerActivity : Activity() {
     }
 
     override fun onPause() {
+        reportProgress(force = true)
         super.onPause()
         player?.pause()
         handler.removeCallbacks(tick)
