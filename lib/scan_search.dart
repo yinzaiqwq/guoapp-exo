@@ -9,8 +9,8 @@ import 'dart:math';
 ///
 /// 安全边界：
 /// - 只绑定局域网地址，跳过回环与常见虚拟网卡
-/// - token 一次性消费，服务有存活上限
-/// - 校验 Host 与 Origin，拒绝 Transfer-Encoding
+/// - 二维码中的随机 token 一次性消费，服务有存活上限
+/// - 拒绝 Transfer-Encoding
 /// - 页面不引用任何外部资源，响应带 CSP / no-store
 class ScanSearchServer {
   ScanSearchServer._(this._server, this._token, this._deadline);
@@ -63,7 +63,8 @@ class ScanSearchServer {
       final candidates = <(int, String)>[];
       for (final interface in interfaces) {
         final name = interface.name.toLowerCase();
-        final virtual = name.contains('docker') ||
+        final virtual =
+            name.contains('docker') ||
             name.contains('veth') ||
             name.contains('vmnet') ||
             name.contains('vbox') ||
@@ -97,9 +98,10 @@ class ScanSearchServer {
 
   static String _randomToken() {
     final random = Random.secure();
-    return List<int>.generate(16, (_) => random.nextInt(256))
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
+    return List<int>.generate(
+      16,
+      (_) => random.nextInt(256),
+    ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
   bool get _expired => DateTime.now().isAfter(_deadline);
@@ -138,15 +140,6 @@ class ScanSearchServer {
       await _respond(response, HttpStatus.notFound, '页面不存在');
       return;
     }
-    // Host 校验：挡住 DNS 重绑定（攻击者用域名指向本机）。
-    // 不做完整字符串比对——手机浏览器与扫码 App 可能改写 Host，
-    // 只要主机部分是电视绑定的 IP 字面量即视为本机访问。
-    final host = request.headers.value(HttpHeaders.hostHeader);
-    if (!_hostAllowed(host)) {
-      await _respond(response, HttpStatus.forbidden, '来源不匹配');
-      return;
-    }
-
     if (request.method == 'GET') {
       await _respond(response, HttpStatus.ok, _form());
       return;
@@ -156,11 +149,6 @@ class ScanSearchServer {
       return;
     }
 
-    final origin = request.headers.value('origin');
-    if (origin != null && !_originAllowed(origin)) {
-      await _respond(response, HttpStatus.forbidden, '来源不匹配');
-      return;
-    }
     if (request.headers.value(HttpHeaders.transferEncodingHeader) != null) {
       await _respond(response, HttpStatus.badRequest, '请求格式错误');
       return;
@@ -182,7 +170,8 @@ class ScanSearchServer {
     }
     final fields = Uri.splitQueryString(String.fromCharCodes(body));
     final query = fields['query']?.trim() ?? '';
-    final invalid = query.isEmpty ||
+    final invalid =
+        query.isEmpty ||
         query.length > 80 ||
         query.runes.any((r) => r < 0x20 || r == 0x7f);
     if (invalid) {
@@ -200,33 +189,19 @@ class ScanSearchServer {
     await close();
   }
 
-  /// Host 是否可信：主机部分须为电视绑定的 IP 字面量。
-  ///
-  /// DNS 重绑定的前提是用域名指向本机，因此拒绝域名即可阻断；
-  /// 不比对完整字符串，避免手机浏览器改写 Host 造成误拒。
-  bool _hostAllowed(String? host) {
-    if (host == null || host.isEmpty) return false;
-    final uri = Uri.tryParse('http://${host.trim()}');
-    final address = uri == null ? null : InternetAddress.tryParse(uri.host);
-    return address != null && address.address == _server.address.address;
-  }
-
-  /// Origin 是否可信：scheme 为 http 且主机是电视绑定的 IP 字面量。
-  bool _originAllowed(String origin) {
-    final uri = Uri.tryParse(origin);
-    if (uri == null || uri.scheme != 'http') return false;
-    final address = InternetAddress.tryParse(uri.host);
-    return address != null && address.address == _server.address.address;
-  }
-
-  Future<void> _respond(HttpResponse response, int status, String message) async {
+  Future<void> _respond(
+    HttpResponse response,
+    int status,
+    String message,
+  ) async {
     response.statusCode = status;
     response.headers.contentType = ContentType.html;
     response.write(_page(message));
     await response.close();
   }
 
-  String _form() => '''
+  String _form() =>
+      '''
 <h1>在电视上搜索</h1>
 <p>输入剧名，电视会按当前选择的站源搜索。</p>
 <form method="post" action="/$_token/submit">
