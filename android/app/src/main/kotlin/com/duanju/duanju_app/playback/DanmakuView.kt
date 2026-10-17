@@ -26,6 +26,11 @@ internal class DanmakuView(context: Context) : View(context) {
 
     private var items: List<Item> = emptyList()
     private var enabled = true
+    private var areaFraction = 0.33f
+    private var fontSize = 34f
+    private var opacity = 1f
+    private var travelMs = 9_000f
+    private var blockedWords: List<String> = emptyList()
 
     /** 播放进度对应的时钟基准：positionMs 对应 uptimeMs 时刻。 */
     private var anchorPositionMs = 0L
@@ -50,8 +55,6 @@ internal class DanmakuView(context: Context) : View(context) {
     }
 
     /** 一条弹幕穿过屏幕所需时间。 */
-    private val travelMs = 9_000f
-    private val laneHeight = 46f
     private val topMargin = 24f
 
     init {
@@ -88,6 +91,20 @@ internal class DanmakuView(context: Context) : View(context) {
         } else {
             restart()
         }
+    }
+
+    fun configure(area: Float, font: Float, alpha: Float, durationMs: Float, blocked: String) {
+        areaFraction = area.coerceIn(0.2f, 0.5f)
+        fontSize = font.coerceIn(24f, 48f)
+        opacity = alpha.coerceIn(0.2f, 1f)
+        travelMs = durationMs.coerceIn(5_000f, 15_000f)
+        blockedWords = blocked.split(',', '，', '\n').map { it.trim() }.filter { it.isNotEmpty() }
+        paint.textSize = fontSize
+        paint.alpha = (255 * opacity).toInt()
+        paint.setShadowLayer(3f, 1.5f, 1.5f, Color.argb((200 * opacity).toInt(), 0, 0, 0))
+        strokePaint.textSize = fontSize
+        strokePaint.alpha = (190 * opacity).toInt()
+        invalidate()
     }
 
     /**
@@ -140,10 +157,12 @@ internal class DanmakuView(context: Context) : View(context) {
             if (items[middle].timeMs < windowStart) low = middle + 1 else high = middle
         }
 
-        val lanes = maxOf(1, ((height - topMargin) / laneHeight).toInt())
+        val laneHeight = fontSize + 12f
+        val lanes = ((height * areaFraction - topMargin) / laneHeight).toInt().coerceIn(1, 4)
         var drawn = 0
         for (index in low until items.size) {
             val item = items[index]
+            if (blockedWords.any { item.text.contains(it, ignoreCase = true) }) continue
             val elapsed = now - item.timeMs
             if (elapsed < 0) break
             if (elapsed > travelMs.toLong()) continue
@@ -151,7 +170,7 @@ internal class DanmakuView(context: Context) : View(context) {
             val x = width - (width + textWidth) * (elapsed / travelMs)
             if (x > width || x + textWidth < 0f) continue
             val lane = index % lanes
-            val y = topMargin + lane * laneHeight + paint.textSize
+            val y = topMargin + lane * laneHeight + fontSize
             canvas.drawText(item.text, x, y, strokePaint)
             canvas.drawText(item.text, x, y, paint)
             drawn++

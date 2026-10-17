@@ -1,6 +1,7 @@
 package com.duanju.duanju_app
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -14,6 +15,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -153,6 +155,70 @@ class NativePlayerActivity : Activity() {
     private var currentQuality = 0
     private var selectedQuality = 0
     private var backArmed = false
+    private val danmakuPreferences by lazy { getSharedPreferences("tv_danmaku", MODE_PRIVATE) }
+
+    private fun applyDanmakuSettings() {
+        danmakuView?.configure(
+            danmakuPreferences.getFloat("area", 0.33f),
+            danmakuPreferences.getFloat("font", 34f),
+            danmakuPreferences.getFloat("opacity", 1f),
+            danmakuPreferences.getFloat("duration", 9_000f),
+            danmakuPreferences.getString("blocked", "").orEmpty(),
+        )
+    }
+
+    private fun chooseDanmakuValue(title: String, key: String, labels: Array<String>, values: FloatArray) {
+        val initial = when (key) {
+            "area" -> 0.33f
+            "font" -> 34f
+            "opacity" -> 1f
+            else -> 9_000f
+        }
+        val current = danmakuPreferences.getFloat(key, initial)
+        val selected = values.indexOfFirst { it == current }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setSingleChoiceItems(labels, selected) { dialog, index ->
+                danmakuPreferences.edit().putFloat(key, values[index]).apply()
+                applyDanmakuSettings()
+                dialog.dismiss()
+                handler.postDelayed({ showDanmakuSettings() }, 150)
+            }
+            .setNegativeButton("返回") { _, _ -> handler.postDelayed({ showDanmakuSettings() }, 150) }
+            .show()
+    }
+
+    private fun showDanmakuSettings() {
+        val options = arrayOf("显示区域", "字号", "透明度", "滚动速度", "屏蔽词")
+        AlertDialog.Builder(this)
+            .setTitle("弹幕设置")
+            .setItems(options) { _, index -> handler.postDelayed({
+                when (index) {
+                    0 -> chooseDanmakuValue("显示区域", "area", arrayOf("上方 1/4", "上方 1/3", "上方 1/2"), floatArrayOf(0.25f, 0.33f, 0.5f))
+                    1 -> chooseDanmakuValue("字号", "font", arrayOf("小", "中", "大"), floatArrayOf(26f, 34f, 42f))
+                    2 -> chooseDanmakuValue("透明度", "opacity", arrayOf("30%", "60%", "100%"), floatArrayOf(0.3f, 0.6f, 1f))
+                    3 -> chooseDanmakuValue("滚动速度", "duration", arrayOf("快", "中", "慢"), floatArrayOf(6_000f, 9_000f, 12_000f))
+                    4 -> {
+                        val input = EditText(this).apply {
+                            setSingleLine(false)
+                            setText(danmakuPreferences.getString("blocked", ""))
+                            hint = "多个关键词用逗号分隔"
+                        }
+                        AlertDialog.Builder(this)
+                            .setTitle("屏蔽词")
+                            .setView(input)
+                            .setPositiveButton("保存") { _, _ ->
+                                danmakuPreferences.edit().putString("blocked", input.text.toString()).apply()
+                                applyDanmakuSettings()
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                }
+            }, 150) }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
@@ -260,6 +326,8 @@ class NativePlayerActivity : Activity() {
             )
         }
         danmakuView = danmaku
+        danmakuEnabled = danmakuPreferences.getBoolean("enabled", true)
+        applyDanmakuSettings()
         root.addView(danmaku)
 
         // 底部提示条：只在操作时短暂出现
@@ -287,10 +355,12 @@ class NativePlayerActivity : Activity() {
             this,
             onToggleDanmaku = {
                 danmakuEnabled = !danmakuEnabled
+                danmakuPreferences.edit().putBoolean("enabled", danmakuEnabled).apply()
                 danmaku.setDanmakuEnabled(danmakuEnabled)
                 menuBarRef?.setDanmakuEnabled(danmakuEnabled)
                 showHint(if (danmakuEnabled) "弹幕已开启" else "弹幕已关闭")
             },
+            onDanmakuSettings = { showDanmakuSettings() },
             onQuality = { toggleQualityPanel() },
             onEpisodes = { togglePanel() },
             onSpeed = {
@@ -675,7 +745,7 @@ class NativePlayerActivity : Activity() {
                 KeyEvent.KEYCODE_BACK -> {
                     qualityPanel?.visibility = View.GONE
                     menuBarRef?.visibility = View.VISIBLE
-                    menuBarRef?.selectItem(1)
+                    menuBarRef?.selectItem(2)
                     return true
                 }
             }

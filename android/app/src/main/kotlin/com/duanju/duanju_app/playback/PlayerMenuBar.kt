@@ -19,6 +19,7 @@ import android.widget.TextView
 internal class PlayerMenuBar(
     context: Context,
     private val onToggleDanmaku: () -> Unit,
+    private val onDanmakuSettings: () -> Unit,
     private val onQuality: () -> Unit,
     private val onEpisodes: () -> Unit,
     private val onSpeed: () -> Unit,
@@ -61,6 +62,7 @@ internal class PlayerMenuBar(
         }
 
         addItem("弹幕 开", onToggleDanmaku)
+        addItem("弹幕设置", onDanmakuSettings)
         addItem("清晰度", onQuality)
         addItem("选集", onEpisodes)
         addItem("倍速 1.0x", onSpeed)
@@ -76,7 +78,7 @@ internal class PlayerMenuBar(
 
     fun setSpeed(speed: Float) {
         val label = if (speed == speed.toInt().toFloat()) "${speed.toInt()}.0x" else "${speed}x"
-        items.getOrNull(3)?.text = "倍速 $label"
+        items.getOrNull(4)?.text = "倍速 $label"
         highlight()
     }
 
@@ -110,9 +112,10 @@ internal class PlayerMenuBar(
                         danmakuOn = !danmakuOn
                         onToggleDanmaku()
                     }
-                    1 -> onQuality()
-                    2 -> onEpisodes()
-                    3 -> onSpeed()
+                    1 -> onDanmakuSettings()
+                    2 -> onQuality()
+                    3 -> onEpisodes()
+                    4 -> onSpeed()
                 }
                 return true
             }

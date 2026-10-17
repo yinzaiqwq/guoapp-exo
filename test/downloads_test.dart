@@ -549,12 +549,15 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('TV delete confirmation focuses the destructive action', (
+  testWidgets('TV deletes the whole download collection with remote select', (
     tester,
   ) async {
     size(tester, const Size(960, 540));
     final repository = DownloadRepository()
-      ..jobs = [DownloadRepository().job(1, 'completed')];
+      ..jobs = [
+        DownloadRepository().job(1, 'completed'),
+        DownloadRepository().job(2, 'paused'),
+      ];
     await tester.pumpWidget(
       televisionHost(
         child: DownloadsScreen(
@@ -564,14 +567,24 @@ void main() {
       ),
     );
     await tick(tester);
-    await tester.tap(find.byTooltip('测试短剧 · 合集操作'));
+    await tester.tap(find.byTooltip('筛选下载合集'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('取消任务并删除视频'));
+    await tester.tap(find.text('已下载'));
+    await tester.tap(find.text('应用'));
     await tester.pumpAndSettle();
+    final deleteButton = find.byKey(
+      const ValueKey('download-remove-collection-hongguo:100'),
+    );
+    expect(deleteButton, findsOneWidget);
+    Focus.of(tester.element(find.text('删除整部'))).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('共 2 项'), findsOneWidget);
     expect(find.text('确认删除'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.select);
     await tick(tester);
-    expect(repository.commands, contains('remove:1'));
+    expect(repository.commands, containsAll(['remove:1', 'remove:2']));
     expect(tester.takeException(), isNull);
   });
 
