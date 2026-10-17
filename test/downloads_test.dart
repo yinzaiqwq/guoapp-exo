@@ -574,4 +574,32 @@ void main() {
     expect(repository.commands, contains('remove:1'));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('TV episode can be deleted with remote select', (tester) async {
+    size(tester, const Size(960, 540));
+    final repository = DownloadRepository()
+      ..jobs = [DownloadRepository().job(1, 'completed')];
+    await tester.pumpWidget(
+      televisionHost(
+        child: DownloadsScreen(
+          repository: repository,
+          store: await makeStore(),
+        ),
+      ),
+    );
+    await tick(tester);
+    await tester.tap(find.text('测试短剧').first);
+    await tester.pumpAndSettle();
+    final deleteButton = find.byKey(const ValueKey('download-remove-1'));
+    expect(deleteButton, findsOneWidget);
+    Focus.of(tester.element(find.text('删除视频'))).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.text('确认删除'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tick(tester);
+    expect(repository.commands, contains('remove:1'));
+    expect(tester.takeException(), isNull);
+  });
 }

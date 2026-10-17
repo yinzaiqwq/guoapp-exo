@@ -527,34 +527,55 @@ class DownloadsScreenState extends State<DownloadsScreen> {
                 : null,
             trailing: _selecting
                 ? null
-                : PopupMenuButton<String>(
-                    enabled: !_busy,
-                    tooltip: '分集操作',
-                    onSelected: (value) {
-                      if (value == 'play') {
-                        _play(job);
-                      } else {
-                        _batch(value, [job]);
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      if (job.completed)
-                        const PopupMenuItem(value: 'play', child: Text('本地播放')),
-                      if (job.active)
-                        const PopupMenuItem(value: 'pause', child: Text('暂停')),
-                      if (job.resumable)
-                        const PopupMenuItem(
-                          value: 'resume',
-                          child: Text('继续 / 重试'),
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (AppLayout.isTelevision(context))
+                        TextButton.icon(
+                          key: ValueKey('download-remove-${job.id}'),
+                          onPressed: _busy
+                              ? null
+                              : () => _batch('remove', [job]),
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          label: Text(job.completed ? '删除视频' : '取消下载'),
                         ),
-                      if (job.completed)
-                        PopupMenuItem(
-                          value: job.archived ? 'restore' : 'archive',
-                          child: Text(job.archived ? '恢复任务' : '清理任务，保留视频'),
-                        ),
-                      PopupMenuItem(
-                        value: 'remove',
-                        child: Text(job.completed ? '删除视频' : '取消下载'),
+                      PopupMenuButton<String>(
+                        enabled: !_busy,
+                        tooltip: '分集操作',
+                        onSelected: (value) {
+                          if (value == 'play') {
+                            _play(job);
+                          } else {
+                            _batch(value, [job]);
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          if (job.completed)
+                            const PopupMenuItem(
+                              value: 'play',
+                              child: Text('本地播放'),
+                            ),
+                          if (job.active)
+                            const PopupMenuItem(
+                              value: 'pause',
+                              child: Text('暂停'),
+                            ),
+                          if (job.resumable)
+                            const PopupMenuItem(
+                              value: 'resume',
+                              child: Text('继续 / 重试'),
+                            ),
+                          if (job.completed)
+                            PopupMenuItem(
+                              value: job.archived ? 'restore' : 'archive',
+                              child: Text(job.archived ? '恢复任务' : '清理任务，保留视频'),
+                            ),
+                          if (!AppLayout.isTelevision(context))
+                            PopupMenuItem(
+                              value: 'remove',
+                              child: Text(job.completed ? '删除视频' : '取消下载'),
+                            ),
+                        ],
                       ),
                     ],
                   ),
