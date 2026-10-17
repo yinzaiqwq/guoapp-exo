@@ -52,6 +52,7 @@ class PlayerScreen extends StatefulWidget {
     this.playerFactory,
     this.videoBuilder,
     this.handoff,
+    this.planResolver,
   });
   final DramaDetail detail;
   final int initialIndex;
@@ -62,6 +63,7 @@ class PlayerScreen extends StatefulWidget {
   final AppRepository repository;
   final LocalStore store;
   final LanIncomingPlayback? handoff;
+  final Future<PlaybackPlan> Function(int index)? planResolver;
   @visibleForTesting
   final Player Function()? playerFactory;
   @visibleForTesting
@@ -179,7 +181,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _requestedQuality = preferences.quality;
     _autoAdvance = true;
     _danmakuEnabled = preferences.danmaku;
-    _preloadEnabled = true;
+    _preloadEnabled = widget.planResolver == null;
     _loader = PlaybackLoader(widget.repository);
     _preloader = PlaybackPreloader(widget.repository);
     _danmaku = DanmakuController(widget.repository)
@@ -663,7 +665,8 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _syncPreload() {
     if (_closed) return;
-    if (!_preloadEnabled ||
+    if (widget.planResolver != null ||
+        !_preloadEnabled ||
         !_foreground ||
         widget.localOnly ||
         _plan?.local == true ||
@@ -988,6 +991,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           ? await _loader.fallback(retained!)
           : warmed != null
           ? await _loader.use(warmed)
+          : widget.planResolver != null
+          ? await _loader.use(await widget.planResolver!(index))
           : await _loader.load(
               widget.detail.drama,
               widget.detail.episodes[index],
@@ -1439,7 +1444,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _interactions.cancel();
     final nextPreferences = preferences.copyWith(
       autoAdvance: true,
-      preload: true,
+      preload: widget.planResolver == null,
     );
     await widget.store.setPlaybackPreferences(nextPreferences);
     if (!mounted || _closed || widget.store.profileEpoch != _profileEpoch)
@@ -1451,7 +1456,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _requestedQuality = nextPreferences.quality;
       _autoAdvance = true;
       _danmakuEnabled = nextPreferences.danmaku;
-      _preloadEnabled = true;
+      _preloadEnabled = widget.planResolver == null;
     });
     _danmaku.setEnabled(_danmakuEnabled);
     _syncDanmaku();

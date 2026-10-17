@@ -14,6 +14,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -176,48 +177,110 @@ class NativePlayerActivity : Activity() {
         }
         val current = danmakuPreferences.getFloat(key, initial)
         val selected = values.indexOfFirst { it == current }.coerceAtLeast(0)
-        AlertDialog.Builder(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        lateinit var dialog: AlertDialog
+        labels.forEachIndexed { index, label ->
+            content.addView(Button(this).apply {
+                text = if (index == selected) "✓ $label" else label
+                textSize = 20f
+                isAllCaps = false
+                isFocusable = true
+                minHeight = dp(56)
+                setOnClickListener {
+                    danmakuPreferences.edit().putFloat(key, values[index]).apply()
+                    applyDanmakuSettings()
+                    dialog.dismiss()
+                    this@NativePlayerActivity.handler.postDelayed({ showDanmakuSettings() }, 150)
+                }
+            })
+        }
+        dialog = AlertDialog.Builder(this)
             .setTitle(title)
-            .setSingleChoiceItems(labels, selected) { dialog, index ->
-                danmakuPreferences.edit().putFloat(key, values[index]).apply()
-                applyDanmakuSettings()
-                dialog.dismiss()
-                handler.postDelayed({ showDanmakuSettings() }, 150)
-            }
+            .setView(content)
             .setNegativeButton("返回") { _, _ -> handler.postDelayed({ showDanmakuSettings() }, 150) }
-            .show()
+            .create()
+        dialog.setOnShowListener { content.getChildAt(selected)?.requestFocus() }
+        dialog.show()
     }
 
     private fun showDanmakuSettings() {
-        val options = arrayOf("显示区域", "字号", "透明度", "滚动速度", "屏蔽词")
-        AlertDialog.Builder(this)
-            .setTitle("弹幕设置")
-            .setItems(options) { _, index -> handler.postDelayed({
-                when (index) {
-                    0 -> chooseDanmakuValue("显示区域", "area", arrayOf("上方 1/4", "上方 1/3", "上方 1/2"), floatArrayOf(0.25f, 0.33f, 0.5f))
-                    1 -> chooseDanmakuValue("字号", "font", arrayOf("小", "中", "大"), floatArrayOf(26f, 34f, 42f))
-                    2 -> chooseDanmakuValue("透明度", "opacity", arrayOf("30%", "60%", "100%"), floatArrayOf(0.3f, 0.6f, 1f))
-                    3 -> chooseDanmakuValue("滚动速度", "duration", arrayOf("快", "中", "慢"), floatArrayOf(6_000f, 9_000f, 12_000f))
-                    4 -> {
-                        val input = EditText(this).apply {
-                            setSingleLine(false)
-                            setText(danmakuPreferences.getString("blocked", ""))
-                            hint = "多个关键词用逗号分隔"
-                        }
-                        AlertDialog.Builder(this)
-                            .setTitle("屏蔽词")
-                            .setView(input)
-                            .setPositiveButton("保存") { _, _ ->
-                                danmakuPreferences.edit().putString("blocked", input.text.toString()).apply()
-                                applyDanmakuSettings()
-                            }
-                            .setNegativeButton("取消", null)
-                            .show()
-                    }
+        val area = when (danmakuPreferences.getFloat("area", 0.33f)) {
+            0.25f -> "上方 1/4"
+            0.5f -> "上方 1/2"
+            else -> "上方 1/3"
+        }
+        val font = when (danmakuPreferences.getFloat("font", 34f)) {
+            26f -> "小"
+            42f -> "大"
+            else -> "中"
+        }
+        val opacity = when (danmakuPreferences.getFloat("opacity", 1f)) {
+            0.3f -> "30%"
+            0.6f -> "60%"
+            else -> "100%"
+        }
+        val speed = when (danmakuPreferences.getFloat("duration", 9_000f)) {
+            6_000f -> "快"
+            12_000f -> "慢"
+            else -> "中"
+        }
+        val blocked = if (danmakuPreferences.getString("blocked", "").isNullOrBlank()) "未设置" else "已设置"
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        lateinit var dialog: AlertDialog
+        fun option(label: String, action: () -> Unit) {
+            content.addView(Button(this).apply {
+                text = label
+                textSize = 20f
+                isAllCaps = false
+                isFocusable = true
+                minHeight = dp(56)
+                setOnClickListener {
+                    dialog.dismiss()
+                    this@NativePlayerActivity.handler.postDelayed({ action() }, 150)
                 }
-            }, 150) }
+            })
+        }
+        option("显示区域 · $area") {
+            chooseDanmakuValue("显示区域", "area", arrayOf("上方 1/4", "上方 1/3", "上方 1/2"), floatArrayOf(0.25f, 0.33f, 0.5f))
+        }
+        option("字号 · $font") {
+            chooseDanmakuValue("字号", "font", arrayOf("小", "中", "大"), floatArrayOf(26f, 34f, 42f))
+        }
+        option("透明度 · $opacity") {
+            chooseDanmakuValue("透明度", "opacity", arrayOf("30%", "60%", "100%"), floatArrayOf(0.3f, 0.6f, 1f))
+        }
+        option("滚动速度 · $speed") {
+            chooseDanmakuValue("滚动速度", "duration", arrayOf("快", "中", "慢"), floatArrayOf(6_000f, 9_000f, 12_000f))
+        }
+        option("屏蔽词 · $blocked") {
+            val input = EditText(this).apply {
+                setSingleLine(false)
+                setText(danmakuPreferences.getString("blocked", ""))
+                hint = "多个关键词用逗号分隔"
+            }
+            AlertDialog.Builder(this)
+                .setTitle("屏蔽词")
+                .setView(input)
+                .setPositiveButton("保存") { _, _ ->
+                    danmakuPreferences.edit().putString("blocked", input.text.toString()).apply()
+                    applyDanmakuSettings()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+        dialog = AlertDialog.Builder(this)
+            .setTitle("弹幕设置")
+            .setView(content)
             .setNegativeButton("关闭", null)
-            .show()
+            .create()
+        dialog.setOnShowListener { content.getChildAt(0)?.requestFocus() }
+        dialog.show()
     }
 
     private val handler = Handler(Looper.getMainLooper())

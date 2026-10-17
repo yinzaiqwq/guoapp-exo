@@ -156,3 +156,25 @@ func (d *Downloader) serverDownloadDelete(ctx context.Context, folder string, ep
 	}
 	return payload.Message, nil
 }
+
+func (d *Downloader) serverDownloadPlan(folder string, filename string) (nativePlan, error) {
+	folder = strings.TrimSpace(folder)
+	filename = strings.TrimSpace(filename)
+	if folder == "" || filename == "" {
+		return nativePlan{}, errors.New("缺少服务器视频信息")
+	}
+	if folder == ".." || filename == ".." || strings.ContainsAny(folder, "/\\") || strings.ContainsAny(filename, "/\\") {
+		return nativePlan{}, errors.New("服务器视频路径无效")
+	}
+	site := d.providerBaseURL(sourceHongguotv)
+	values := url.Values{}
+	values.Set("folder", folder)
+	values.Set("filename", filename)
+	values.Set("api_key", hongguotvAPIKey)
+	return nativePlan{
+		URL:        site + "/download/file?" + values.Encode(),
+		Headers:    map[string]string{"Referer": site + "/"},
+		Qualities:  []int{},
+		RouteCount: 1,
+	}, nil
+}

@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'core_bridge.dart';
+import 'local_store.dart';
+import 'models.dart';
+import 'player_screen.dart';
 import 'server_downloads.dart';
 
 /// 服务器端已下载内容的管理界面。
@@ -10,9 +13,14 @@ import 'server_downloads.dart';
 /// 这里管理的是自建红果TV 服务磁盘上的副本，与设备本地下载无关：
 /// 删除只释放服务器空间，之后仍可重新下载或直接在线播放。
 class ServerDownloadsScreen extends StatefulWidget {
-  const ServerDownloadsScreen({super.key, required this.repository});
+  const ServerDownloadsScreen({
+    super.key,
+    required this.repository,
+    required this.store,
+  });
 
   final AppRepository repository;
+  final LocalStore store;
 
   @override
   State<ServerDownloadsScreen> createState() => _ServerDownloadsScreenState();
@@ -23,6 +31,7 @@ class _ServerDownloadsScreenState extends State<ServerDownloadsScreen> {
   String? _error;
   bool _loading = true;
   bool _busy = false;
+  bool _opening = false;
   final _expanded = <String>{};
 
   @override
@@ -87,12 +96,56 @@ class _ServerDownloadsScreenState extends State<ServerDownloadsScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error is AppFailure ? error.message : '删除失败'),
-        ),
+        SnackBar(content: Text(error is AppFailure ? error.message : '删除失败')),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _play(ServerDownloadDrama drama, int initialIndex) async {
+    if (_opening || initialIndex < 0 || initialIndex >= drama.episodes.length) {
+      return;
+    }
+    _opening = true;
+    final episodes = [
+      for (final episode in drama.episodes)
+        Episode({
+          'id': episode.filename,
+          'title': '第 ${episode.index} 集',
+          'currentEpisode': episode.index,
+        }, episode.index),
+    ];
+    final seriesId = drama.seriesId.isEmpty ? drama.folder : drama.seriesId;
+    final detail = DramaDetail(
+      Drama(
+        id: 'hongguotv:$seriesId',
+        source: 'hongguotv',
+        sourceId: seriesId,
+        title: drama.title,
+        episodes: episodes.length,
+      ),
+      episodes,
+    );
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PlayerScreen(
+            detail: detail,
+            initialIndex: initialIndex,
+            repository: widget.repository,
+            store: widget.store,
+            allowOnlineFallback: false,
+            mediaId: 'server-download:${drama.folder}',
+            planResolver: (index) => widget.repository.serverDownloadPlayback(
+              drama.folder,
+              drama.episodes[index].filename,
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _opening = false;
     }
   }
 
@@ -212,6 +265,14 @@ class _ServerDownloadsScreenState extends State<ServerDownloadsScreen> {
               children: [
                 if (drama.episodes.isNotEmpty)
                   IconButton(
+                    tooltip: '从第 1 集播放',
+                    onPressed: _opening
+                        ? null
+                        : () => unawaited(_play(drama, 0)),
+                    icon: const Icon(Icons.play_circle_outline_rounded),
+                  ),
+                if (drama.episodes.isNotEmpty)
+                  IconButton(
                     tooltip: expanded ? '收起分集' : '展开分集',
                     onPressed: () => setState(() {
                       if (expanded) {
@@ -228,9 +289,7 @@ class _ServerDownloadsScreenState extends State<ServerDownloadsScreen> {
                   ),
                 IconButton(
                   tooltip: '删除整部',
-                  onPressed: _busy
-                      ? null
-                      : () => unawaited(_delete(drama)),
+                  onPressed: _busy ? null : () => unawaited(_delete(drama)),
                   icon: Icon(
                     Icons.delete_outline_rounded,
                     color: theme.colorScheme.error,
@@ -285,6 +344,11 @@ class _ServerDownloadsScreenState extends State<ServerDownloadsScreen> {
                           color: theme.colorScheme.error,
                         ),
                       ),
+                      onTap: _opening
+                          ? null
+                          : () => unawaited(
+                              _play(drama, drama.episodes.indexOf(episode)),
+                            ),
                     ),
                 ],
               ),

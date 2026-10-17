@@ -182,12 +182,16 @@ func TestNativeCoverRedirectAndBoundedDiskCache(t *testing.T) {
 func TestNativeCatalogCacheFreshnessPagingAndRefresh(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
 		if r.URL.Path != "/api/videos/category/ai-duanju" {
-			t.Error("test must only request synthetic catalog metadata", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
+			if r.URL.Path != "/api/videos/category/ai-mogai" && r.URL.Path != "/api/videos/category/ai-manju" && r.URL.Path != "/api/videos/category/ai-huanlian" {
+				t.Error("test must only request synthetic catalog metadata", r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
 			return
 		}
+		calls.Add(1)
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 		count := 24
 		if page > 1 {

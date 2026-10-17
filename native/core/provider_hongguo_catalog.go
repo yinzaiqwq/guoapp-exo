@@ -56,7 +56,7 @@ func (downloader *Downloader) fetchHongguoAppCatalogCategory(ctx context.Context
 	defer client.catalogMu.Unlock()
 	more, _ := ctx.Value(libraryMoreKey{}).(bool)
 	update, _ := ctx.Value(libraryUpdateKey{}).(bool)
-	known, _ := ctx.Value(libraryKnownKey{}).(map[string]bool)
+	known, browsing := ctx.Value(libraryKnownKey{}).(map[string]bool)
 	state := downloader.hongguoCatalogSnapshot()
 	pageLimit := downloader.cfg.MaxPagesPerSort
 	if pageLimit < 1 {
@@ -64,6 +64,9 @@ func (downloader *Downloader) fetchHongguoAppCatalogCategory(ctx context.Context
 	}
 	if pageLimit > 200 {
 		pageLimit = 200
+	}
+	if browsing && !update {
+		pageLimit = 1
 	}
 	headLimit := min(pageLimit, 3)
 	roundLimit := pageLimit

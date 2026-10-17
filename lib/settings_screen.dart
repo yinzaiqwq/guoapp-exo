@@ -47,7 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _busy = false;
   String? _message;
 
-/// 检查并应用 Windows 更新。
+  /// 检查并应用 Windows 更新。
   ///
   /// 只处理本机平台：其他平台的入口本身不显示，这里再挡一次以防误调。
   Future<void> _checkUpdate() async {
@@ -76,7 +76,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text(
                   [
                     '当前版本：$appVersion',
-                    if (update.sizeLabel.isNotEmpty) '更新包大小：${update.sizeLabel}',
+                    if (update.sizeLabel.isNotEmpty)
+                      '更新包大小：${update.sizeLabel}',
                   ].join('\n'),
                   style: const TextStyle(fontSize: 13),
                 ),
@@ -108,7 +109,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _downloadAndApply(updater, update);
     } catch (error) {
       if (mounted) {
-        setState(() => _message = error is HttpException ? error.message : '检查更新失败');
+        setState(
+          () => _message = error is HttpException ? error.message : '检查更新失败',
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -165,10 +168,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: const Text('更新已就绪'),
           content: const Text('程序即将关闭以完成替换，随后会自动重新启动。'),
           actions: [
-            FilledButton(
-              onPressed: () => exit(0),
-              child: const Text('立即重启'),
-            ),
+            FilledButton(onPressed: () => exit(0), child: const Text('立即重启')),
           ],
         ),
       );
@@ -309,6 +309,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   MaterialPageRoute<void>(
                     builder: (_) => ServerDownloadsScreen(
                       repository: widget.repository,
+                      store: widget.store,
                     ),
                   ),
                 ),

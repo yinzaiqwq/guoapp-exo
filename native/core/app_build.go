@@ -55,7 +55,7 @@ func nativeAuthorizeInput(input nativeInput) error {
 			(!nativeDramaAvailable(input.Drama) || sourceFromDramaID(input.Drama.ID) != canonicalProviderSource(input.Source)) {
 			return errNativeBuildSource
 		}
-	case "serverDownloads", "deleteServerDownload":
+	case "serverDownloads", "deleteServerDownload", "serverDownloadPlayback":
 		// 服务器下载管理只对自建红果TV 服务有意义
 		if !nativeSourceAvailable(sourceHongguotv) {
 			return errNativeBuildSource

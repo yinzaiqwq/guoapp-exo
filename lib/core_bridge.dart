@@ -101,6 +101,10 @@ abstract class AppRepository {
     String folder, {
     String episode = '',
   }) async => throw AppFailure('当前环境不支持服务器下载管理');
+  Future<PlaybackPlan> serverDownloadPlayback(
+    String folder,
+    String filename,
+  ) async => throw AppFailure('当前环境不支持服务器下载播放');
   Future<DanmakuPage> danmaku(
     PlaybackPlan plan, {
     required int startMs,
@@ -364,6 +368,21 @@ class NativeRepository extends AppRepository {
   }
 
   @override
+  Future<PlaybackPlan> serverDownloadPlayback(
+    String folder,
+    String filename,
+  ) async {
+    _authorize('hongguotv');
+    return PlaybackPlan.fromJson(
+      await _read('server-playback', {
+        'action': 'serverDownloadPlayback',
+        'directory': folder,
+        'command': filename,
+      }),
+    );
+  }
+
+  @override
   Future<void> cancelCatalog() => _cancelReads('catalog-');
   @override
   Future<void> cancelSuggestions() => _cancelReads('suggestions');
@@ -605,16 +624,15 @@ class NativeRepository extends AppRepository {
         input['force'] = true;
       }
       final body = jsonEncode(input);
+      final timeoutSeconds = switch (action) {
+        'moveDownloads' => 620,
+        'danmaku' => 15,
+        'preload' => 20,
+        'catalog' || 'categories' => 15,
+        _ => 70,
+      };
       final encoded = await Isolate.run(() => _nativeRequest(body)).timeout(
-        Duration(
-          seconds: action == 'moveDownloads'
-              ? 620
-              : action == 'danmaku'
-              ? 15
-              : action == 'preload'
-              ? 20
-              : 70,
-        ),
+        Duration(seconds: timeoutSeconds),
       );
       final response = jsonDecode(encoded) as Map<String, dynamic>;
       if (response['ok'] != true) {

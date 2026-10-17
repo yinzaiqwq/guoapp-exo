@@ -28,6 +28,7 @@ class ServerDownloadDrama {
   const ServerDownloadDrama({
     required this.folder,
     required this.title,
+    this.seriesId = '',
     this.totalEpisodes = 0,
     this.downloaded = 0,
     this.size = '',
@@ -38,6 +39,7 @@ class ServerDownloadDrama {
   /// 服务器上的目录名，删除时用它定位。
   final String folder;
   final String title;
+  final String seriesId;
   final int totalEpisodes;
   final int downloaded;
   final String size;
@@ -48,6 +50,7 @@ class ServerDownloadDrama {
       ServerDownloadDrama(
         folder: json['folder'] as String? ?? '',
         title: json['title'] as String? ?? '',
+        seriesId: json['seriesId'] as String? ?? '',
         totalEpisodes: (json['totalEpisodes'] as num?)?.toInt() ?? 0,
         downloaded: (json['downloaded'] as num?)?.toInt() ?? 0,
         size: json['sizeHuman'] as String? ?? '',
@@ -80,9 +83,7 @@ class ServerDownloadList {
       ServerDownloadList(
         dramas: [
           for (final row in json['dramas'] as List? ?? const [])
-            ServerDownloadDrama.fromJson(
-              Map<String, dynamic>.from(row as Map),
-            ),
+            ServerDownloadDrama.fromJson(Map<String, dynamic>.from(row as Map)),
         ],
         totalSize: json['totalSize'] as String? ?? '',
         diskFree: json['diskFree'] as String? ?? '',

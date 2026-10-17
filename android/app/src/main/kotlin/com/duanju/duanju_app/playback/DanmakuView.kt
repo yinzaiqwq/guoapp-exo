@@ -158,7 +158,7 @@ internal class DanmakuView(context: Context) : View(context) {
         }
 
         val laneHeight = fontSize + 12f
-        val lanes = ((height * areaFraction - topMargin) / laneHeight).toInt().coerceIn(1, 4)
+        val lanes = ((height * areaFraction - topMargin) / laneHeight).toInt().coerceAtLeast(1)
         var drawn = 0
         for (index in low until items.size) {
             val item = items[index]

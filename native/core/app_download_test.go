@@ -110,11 +110,21 @@ func TestNativeDownloadsOriginalBytesPersistenceAndLocalPriority(t *testing.T) {
 			t.Fatalf("missing local file silently used network: %v", err)
 		}
 	}
-	if err := reopened.control(id, "remove"); err != nil {
-		t.Fatal(err)
+	ids := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		ids = append(ids, job.ID)
 	}
-	if _, found, err := reopened.localPlan(input.Drama.ID, 1); found || err != nil {
-		t.Fatal("removed job still selected")
+	result, err := reopened.controlBatch(ids, "remove")
+	if err != nil || len(result.Completed) != len(ids) || len(result.Failures) != 0 {
+		t.Fatalf("batch removal failed: %+v, %v", result, err)
+	}
+	for _, job := range jobs {
+		if _, found, err := reopened.localPlan(input.Drama.ID, job.Index); found || err != nil {
+			t.Fatal("removed job still selected")
+		}
+		if _, err := os.Stat(reopened.jobDirectory(job)); !os.IsNotExist(err) {
+			t.Fatalf("removed job files remain: %v", err)
+		}
 	}
 }
 

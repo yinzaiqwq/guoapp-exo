@@ -458,6 +458,8 @@ func nativeDispatch(input nativeInput) (any, error) {
 		return engine.downloader.serverDownloadList(ctx)
 	case "deleteServerDownload":
 		return engine.downloader.serverDownloadDelete(ctx, input.Directory, input.Command)
+	case "serverDownloadPlayback":
+		return engine.downloader.serverDownloadPlan(input.Directory, input.Command)
 	case "sourceStatus":
 		return engine.sourceStatus(input.Source), nil
 	case "sourceJob":
