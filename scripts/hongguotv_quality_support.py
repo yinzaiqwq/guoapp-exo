@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 def install_hongguotv_quality(namespace):
+    import hashlib
     import json
     import os
     import re
@@ -25,6 +26,90 @@ def install_hongguotv_quality(namespace):
     supported = (360, 480, 540, 720, 1080)
     cache = {}
     cache_lock = threading.Lock()
+    file_cache = {}
+    file_cache_lock = threading.Lock()
+    stream_directory = namespace.get('STREAM_CACHE', os.path.dirname(output_directory))
+
+    def cached_files(vid):
+        vid = validate_vid(vid)
+        for directory, pattern in (
+            (stream_directory, rf'{vid}_(?:best|[0-9]+p)\.mp4'),
+            (output_directory, rf'{vid}_(?:best|[0-9]+p)(?:_shortedge-v2)?_[0-9]+p\.mp4'),
+        ):
+            if not os.path.isdir(directory):
+                continue
+            for name in sorted(os.listdir(directory)):
+                if not re.fullmatch(pattern, name):
+                    continue
+                path = os.path.join(directory, name)
+                if os.path.islink(path) or not os.path.isfile(path):
+                    continue
+                try:
+                    signature = os.stat(path)
+                except OSError:
+                    continue
+                if signature.st_size <= 0:
+                    continue
+                lock_key = f'{vid}_{name[len(vid) + 1:-4]}' if directory == stream_directory else path
+                lock = locks(lock_key)
+                if not lock.acquire(blocking=False):
+                    continue
+                try:
+                    identity = (path, signature.st_size, signature.st_mtime_ns)
+                    with file_cache_lock:
+                        info = file_cache.get(identity)
+                    if info is None:
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                             '-show_entries', 'stream=codec_name,width,height:format=duration',
+                             '-of', 'json', path],
+                            check=True, capture_output=True, text=True, timeout=10,
+                        )
+                        probe = json.loads(result.stdout)
+                        tracks = probe.get('streams') or []
+                        if not tracks or float(probe.get('format', {}).get('duration') or 0) <= 0:
+                            continue
+                        track = tracks[0]
+                        width, height = int(track.get('width') or 0), int(track.get('height') or 0)
+                        if min(width, height) <= 0 or track.get('codec_name') not in ('h264', 'hevc', 'av1', 'vp9'):
+                            continue
+                        info = {'width': width, 'height': height, 'codec': track['codec_name'],
+                                'quality': max((q for q in supported if q <= min(width, height)), default=0)}
+                        with file_cache_lock:
+                            if len(file_cache) >= 1024:
+                                file_cache.pop(next(iter(file_cache)))
+                            file_cache[identity] = info
+                    after = os.stat(path)
+                    if (after.st_size, after.st_mtime_ns) != identity[1:]:
+                        continue
+                    cache_id = hashlib.sha256(repr(identity).encode()).hexdigest()
+                    yield {'path': path, 'cacheId': cache_id, 'bytes': after.st_size, **info}
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    continue
+                finally:
+                    lock.release()
+
+    @app.get('/stream/cache')
+    def stream_cache(vid: str, quality: int = 0):
+        vid = validate_vid(vid)
+        if quality not in (0, *supported):
+            raise http_error(400, '清晰度无效')
+        candidates = [item for item in cached_files(vid) if item['quality'] > 0 and item['quality'] >= quality]
+        if not candidates:
+            return {'profile': 'server-cache-v1', 'vid': vid, 'hit': False}
+        item = max(candidates, key=lambda row: (row['quality'], row['codec'] == 'h264', row['bytes']))
+        return {'profile': 'server-cache-v1', 'vid': vid, 'hit': True,
+                **{key: value for key, value in item.items() if key != 'path'}}
+
+    @app.get('/stream/cache/file')
+    def stream_cache_file(vid: str, cache_id: str):
+        vid = validate_vid(vid)
+        if not re.fullmatch(r'[0-9a-f]{64}', cache_id):
+            raise http_error(400, '缓存标识无效')
+        for item in cached_files(vid):
+            if item['cacheId'] == cache_id:
+                return namespace['FileResponse'](item['path'], media_type='video/mp4')
+        raise http_error(404, '对应缓存已不存在，请重新播放')
 
     def video_dimensions(path):
         result = subprocess.run(
@@ -70,6 +155,9 @@ def install_hongguotv_quality(namespace):
                     return candidate
             except Exception:
                 pass
+        candidates = [item for item in cached_files(vid) if min(item['width'], item['height']) >= requested]
+        if candidates:
+            return max(candidates, key=lambda row: (row['quality'], row['bytes']))['path']
         path = original_decrypted(vid, quality)
         width, height, _ = video_dimensions(path)
         if requested and min(width, height) < requested:
@@ -155,12 +243,23 @@ def install_hongguotv_quality(namespace):
     namespace['_stream_transcode'] = stream_transcode
     return {'target_size': target_size, 'stream_qualities': stream_qualities,
             'video_dimensions': video_dimensions, 'ensure_h264': ensure_h264,
-            'ensure_decrypted': ensure_decrypted, 'h264_path': h264_path}
+            'ensure_decrypted': ensure_decrypted, 'h264_path': h264_path,
+            'stream_cache': stream_cache, 'stream_cache_file': stream_cache_file}
 
 
 def upgraded_source(source):
     activation = '\ninstall_hongguotv_quality(globals())\n'
     if activation in source:
+        tree = ast.parse(source)
+        functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                     and node.name == 'install_hongguotv_quality']
+        if len(functions) != 1:
+            raise ValueError('已安装补丁结构不匹配，未修改')
+        node = functions[0]
+        rows = source.splitlines(keepends=True)
+        replacement = inspect.getsource(install_hongguotv_quality)
+        source = ''.join(rows[:node.lineno - 1]) + replacement + ''.join(rows[node.end_lineno:])
+        ast.parse(source)
         return source
     anchor = 'if __name__ == "__main__":'
     bypass = 'if codec == "h264" and not _is_downloaded(path):'

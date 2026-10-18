@@ -32,9 +32,11 @@ class QualitySupportTests(unittest.TestCase):
         ]
         self.namespace = {
             'app': App(), 'HTTPException': HttpError, 'H264_DIR': self.directory.name,
+            'STREAM_CACHE': self.directory.name,
             'ODL': SimpleNamespace(_video_model=lambda vid: {'video_list': self.tracks}),
             '_ensure_decrypted_original': lambda vid, quality: 'original.mp4',
             '_downloaded_index': lambda: {}, '_dec_lock': lambda key: threading.Lock(),
+            'FileResponse': lambda path, **kwargs: path,
         }
         self.support = install_hongguotv_quality(self.namespace)
 
@@ -131,6 +133,79 @@ class QualitySupportTests(unittest.TestCase):
         self.assertEqual(upgraded_source(upgraded), upgraded)
         with self.assertRaises(ValueError):
             upgraded_source('unrelated = 1\n')
+
+    def test_updates_previously_installed_patch(self):
+        source = 'def install_hongguotv_quality(namespace):\n    return {}\n\ninstall_hongguotv_quality(globals())\n\nif __name__ == "__main__":\n    pass\n'
+        updated = upgraded_source(source)
+        self.assertIn("@app.get('/stream/cache')", updated)
+        self.assertEqual(updated.count('def install_hongguotv_quality('), 1)
+        self.assertEqual(updated, upgraded_source(updated))
+
+    def cache_probe(self, width=1920, height=1080, codec='hevc'):
+        result = json.loads(self.probe(width, height, codec).stdout)
+        result['format'] = {'duration': '100.0'}
+        return SimpleNamespace(stdout=json.dumps(result))
+
+    def test_reads_legacy_best_cache_without_downloading_or_transcoding(self):
+        path = Path(self.directory.name) / '123_best.mp4'
+        path.write_bytes(b'synthetic')
+        self.namespace['_ensure_decrypted_original'] = lambda *args: self.fail('must not download')
+        with patch.object(subprocess, 'run', return_value=self.cache_probe()) as run:
+            info = self.support['stream_cache']('123', 1080)
+            self.assertTrue(info['hit'])
+            self.assertNotIn('path', info)
+            self.assertEqual(info['quality'], 1080)
+            self.assertEqual(self.support['stream_cache_file']('123', info['cacheId']), str(path))
+            self.assertEqual(self.support['ensure_decrypted']('123', '1080p'), str(path))
+            self.assertTrue(all(call.args[0][0] == 'ffprobe' for call in run.call_args_list))
+
+    def test_missing_partial_empty_and_other_video_are_not_hits(self):
+        for name, data in [('123_best.mp4', b''), ('123_best.mp4.tmp.mp4', b'x'),
+                           ('123_best.mp4.enc', b'x'), ('1234_best.mp4', b'x')]:
+            (Path(self.directory.name) / name).write_bytes(data)
+        with patch.object(subprocess, 'run', side_effect=AssertionError('must not probe unrelated or partial files')):
+            self.assertFalse(self.support['stream_cache']('123', 1080)['hit'])
+
+    def test_validates_dimensions_not_legacy_cache_filename(self):
+        (Path(self.directory.name) / '123_best_1080p.mp4').write_bytes(b'synthetic')
+        with patch.object(subprocess, 'run', return_value=self.cache_probe(406, 720, 'h264')):
+            self.assertFalse(self.support['stream_cache']('123', 1080)['hit'])
+            info = self.support['stream_cache']('123', 0)
+            self.assertEqual(info['quality'], 360)
+
+    def test_changed_or_deleted_cache_is_not_silently_replaced(self):
+        path = Path(self.directory.name) / '123_best.mp4'
+        path.write_bytes(b'synthetic')
+        with patch.object(subprocess, 'run', return_value=self.cache_probe()):
+            info = self.support['stream_cache']('123', 1080)
+            path.unlink()
+            with self.assertRaises(HttpError) as raised:
+                self.support['stream_cache_file']('123', info['cacheId'])
+            self.assertEqual(raised.exception.status_code, 404)
+            with self.assertRaises(HttpError):
+                self.support['stream_cache_file']('../escape', info['cacheId'])
+            with self.assertRaises(HttpError):
+                self.support['stream_cache_file']('123', '../escape')
+
+    def test_corrupt_cache_and_missing_duration_are_not_hits(self):
+        (Path(self.directory.name) / '123_best.mp4').write_bytes(b'synthetic')
+        with patch.object(subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'ffprobe')):
+            self.assertFalse(self.support['stream_cache']('123')['hit'])
+        with patch.object(subprocess, 'run', return_value=self.probe(1920, 1080)):
+            self.assertFalse(self.support['stream_cache']('123')['hit'])
+
+    def test_writing_cache_is_skipped(self):
+        path = Path(self.directory.name) / '123_best.mp4'
+        path.write_bytes(b'synthetic')
+        active = threading.Lock()
+        active.acquire()
+        namespace = dict(self.namespace, _dec_lock=lambda key: active)
+        support = install_hongguotv_quality(namespace)
+        try:
+            with patch.object(subprocess, 'run', side_effect=AssertionError('must not probe writing file')):
+                self.assertFalse(support['stream_cache']('123')['hit'])
+        finally:
+            active.release()
 
 
 if __name__ == '__main__':

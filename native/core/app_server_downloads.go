@@ -225,25 +225,89 @@ func (d *Downloader) preferredServerDownload(ctx context.Context, input nativeIn
 		return nativePlan{}, false, nil
 	}
 	plan := plans[0]
-	request, err := http.NewRequestWithContext(lookup, http.MethodGet, plan.URL, nil)
+	readable := d.serverFileReadable(lookup, plan)
+	return plan, readable, ctx.Err()
+}
+
+func (d *Downloader) serverFileReadable(ctx context.Context, plan nativePlan) bool {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, plan.URL, nil)
 	if err != nil {
-		return nativePlan{}, false, err
+		return false
 	}
 	request.Header.Set("Range", "bytes=0-0")
 	request.Header.Set("Referer", plan.Headers["Referer"])
 	response, err := d.doMediaRequest(request)
 	if err != nil {
-		return nativePlan{}, false, ctx.Err()
+		return false
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
-		return nativePlan{}, false, nil
+		return false
 	}
 	var first [1]byte
 	if _, err := io.ReadFull(response.Body, first[:]); err != nil {
+		return false
+	}
+	return true
+}
+
+func (d *Downloader) preferredServerCache(ctx context.Context, input nativeInput) (nativePlan, bool, error) {
+	task := Task{DramaID: input.Drama.ID, Chapter: input.Chapter, Index: input.Index}
+	_, vid, valid := hongguotvPlaybackIDs(task)
+	if !valid {
+		return nativePlan{}, false, nil
+	}
+	lookup, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	values := url.Values{}
+	values.Set("vid", vid)
+	values.Set("quality", strconv.Itoa(input.Quality))
+	var cached struct {
+		Profile string `json:"profile"`
+		VID     string `json:"vid"`
+		Hit     bool   `json:"hit"`
+		CacheID string `json:"cacheId"`
+		Width   int    `json:"width"`
+		Height  int    `json:"height"`
+		Quality int    `json:"quality"`
+	}
+	if err := d.hongguotvJSON(lookup, "/stream/cache", values, &cached); err != nil {
 		return nativePlan{}, false, ctx.Err()
 	}
-	return plan, true, ctx.Err()
+	if !cached.Hit || cached.Profile != "server-cache-v1" || cached.VID != vid ||
+		cached.Quality < input.Quality || cached.Quality <= 0 || min(cached.Width, cached.Height) < cached.Quality || len(cached.CacheID) != 64 {
+		return nativePlan{}, false, nil
+	}
+	for _, char := range cached.CacheID {
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			return nativePlan{}, false, nil
+		}
+	}
+	values = url.Values{}
+	values.Set("vid", vid)
+	values.Set("cache_id", cached.CacheID)
+	values.Set("api_key", hongguotvAPIKey)
+	site := d.providerBaseURL(sourceHongguotv)
+	plan := nativePlan{URL: site + "/stream/cache/file?" + values.Encode(),
+		Headers: map[string]string{"Referer": site + "/"}, ServerDownloaded: true,
+		Quality: cached.Quality, Qualities: []int{cached.Quality}, RouteCount: 1}
+	readable := d.serverFileReadable(lookup, plan)
+	return plan, readable, ctx.Err()
+}
+
+func (engine *nativeEngine) serverDownloadPlayback(ctx context.Context, input nativeInput) (nativePlan, error) {
+	if err := ctx.Err(); err != nil {
+		return nativePlan{}, err
+	}
+	plan, err := engine.downloader.serverDownloadPlan(input.Directory, input.Command)
+	if err == nil {
+		engine.registerServerPlayback(&plan, input)
+	}
+	return plan, err
+}
+
+func (engine *nativeEngine) registerServerPlayback(plan *nativePlan, input nativeInput) {
+	engine.registerLocalPlayback(plan, input)
 }
 
 func (d *Downloader) serverDownloadDetail(ctx context.Context, sourceID string) (Drama, []Chapter, error) {

@@ -103,8 +103,10 @@ abstract class AppRepository {
   }) async => throw AppFailure('当前环境不支持服务器下载管理');
   Future<PlaybackPlan> serverDownloadPlayback(
     String folder,
-    String filename,
-  ) async => throw AppFailure('当前环境不支持服务器下载播放');
+    String filename, {
+    Drama? drama,
+    Episode? episode,
+  }) async => throw AppFailure('当前环境不支持服务器下载播放');
   Future<DanmakuPage> danmaku(
     PlaybackPlan plan, {
     required int startMs,
@@ -326,7 +328,7 @@ class NativeRepository extends AppRepository {
     required int startMs,
     required int durationMs,
   }) async {
-    _authorize('hongguo');
+    _authorize(plan.danmakuSource.isEmpty ? 'hongguo' : plan.danmakuSource);
     // 本地播放同样支持弹幕：服务端按「剧集 + 集号」返回整集弹幕，
     // 与媒体来自网络还是本地无关。仅当缺少会话或弹幕标识时才不可用。
     if (plan.session.isEmpty || plan.danmakuId.isEmpty) {
@@ -335,6 +337,7 @@ class NativeRepository extends AppRepository {
     return DanmakuPage.fromJson(
       await _read('danmaku', {
         'action': 'danmaku',
+        'source': plan.danmakuSource.isEmpty ? 'hongguo' : plan.danmakuSource,
         'playbackSession': plan.session,
         'startMs': startMs,
         'durationMs': durationMs,
@@ -370,14 +373,21 @@ class NativeRepository extends AppRepository {
   @override
   Future<PlaybackPlan> serverDownloadPlayback(
     String folder,
-    String filename,
-  ) async {
+    String filename, {
+    Drama? drama,
+    Episode? episode,
+  }) async {
     _authorize('hongguotv');
     return PlaybackPlan.fromJson(
       await _read('server-playback', {
         'action': 'serverDownloadPlayback',
         'directory': folder,
         'command': filename,
+        if (drama != null) 'drama': drama.toJson(),
+        if (episode != null) ...{
+          'chapter': episode.raw,
+          'index': episode.number,
+        },
       }),
     );
   }
@@ -578,9 +588,11 @@ class NativeRepository extends AppRepository {
       }
       if (action == 'recommendations' ||
           action == 'cachedRecommendations' ||
-          action == 'suggestions' ||
-          action == 'danmaku') {
+          action == 'suggestions') {
         _authorize('hongguo');
+      }
+      if (action == 'danmaku') {
+        _authorize(input['source'] as String? ?? 'hongguo');
       }
       if ({
         'catalog',

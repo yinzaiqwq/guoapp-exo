@@ -152,6 +152,8 @@ class _ServerDownloadsScreenState extends State<ServerDownloadsScreen> {
             planResolver: (index) => widget.repository.serverDownloadPlayback(
               drama.folder,
               drama.episodes[index].filename,
+              drama: detail.drama,
+              episode: episodes[index],
             ),
           ),
         ),

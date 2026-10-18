@@ -16,11 +16,11 @@ type nativePlaybackChoice struct {
 	// danmakuEpisode 是分集序号。自建服务按「剧集 + 集号」取弹幕，
 	// 缺了它任何一集都会拿到第 1 集的弹幕。
 	danmakuEpisode int
-	media         []providerMedia
-	index         int
-	qualities     []int
-	streamSession string
-	created       time.Time
+	media          []providerMedia
+	index          int
+	qualities      []int
+	streamSession  string
+	created        time.Time
 }
 
 func nativePlaybackChoices(media providerMedia, quality int) nativePlaybackChoice {
@@ -76,8 +76,9 @@ func (engine *nativeEngine) nativeOpenPlayback(ctx context.Context, choice nativ
 		return nativePlan{}, errors.New("无法初始化播放会话")
 	}
 	plan := nativePlan{
-		DanmakuID: choice.danmakuVideo,
-		URL:       media.URL, Headers: map[string]string{"User-Agent": userAgent, "Referer": media.Referer},
+		DanmakuSource: choice.danmakuSource,
+		DanmakuID:     choice.danmakuVideo,
+		URL:           media.URL, Headers: map[string]string{"User-Agent": userAgent, "Referer": media.Referer},
 		Key: hex.EncodeToString(media.CENCKey), Quality: media.Quality, Qualities: choice.qualities,
 		RouteIndex: choice.index, RouteCount: len(choice.media), Session: hex.EncodeToString(tokenBytes),
 	}

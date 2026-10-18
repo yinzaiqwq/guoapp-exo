@@ -297,6 +297,7 @@ class PlaybackPlan {
     this.qualities = const [],
     this.session = '',
     this.danmakuId = '',
+    this.danmakuSource = '',
     this.prefetchedBytes = 0,
     this.expiresAt = 0,
     this.routeIndex = 0,
@@ -311,6 +312,7 @@ class PlaybackPlan {
   final List<int> qualities;
   final String session;
   final String danmakuId;
+  final String danmakuSource;
   final int prefetchedBytes;
   final int expiresAt;
   final int routeIndex;
@@ -331,6 +333,7 @@ class PlaybackPlan {
       ..sort((a, b) => b.compareTo(a)),
     session: json['session'] as String? ?? '',
     danmakuId: json['danmakuId'] as String? ?? '',
+    danmakuSource: json['danmakuSource'] as String? ?? '',
     prefetchedBytes: intValue(json['prefetchedBytes']),
     expiresAt: intValue(json['expiresAt']),
     routeIndex: intValue(json['routeIndex']),

@@ -323,8 +323,12 @@ func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID str
 	if err := ctx.Err(); err != nil {
 		return hongguoDanmakuPage{}, err
 	}
-	if !hongguoNumericID.MatchString(seriesID) || !hongguoNumericID.MatchString(videoID) {
+	if !hongguoNumericID.MatchString(seriesID) ||
+		(!hongguoNumericID.MatchString(videoID) && (episode < 1 || videoID != fmt.Sprintf("episode:%d", episode))) {
 		return hongguoDanmakuPage{}, errors.New("弹幕请求参数无效")
+	}
+	if start < 0 || duration <= start || duration > danmakuMaxDurationMS {
+		return hongguoDanmakuPage{}, errors.New("弹幕时间范围无效")
 	}
 	// 服务端按「剧集 + 集号」返回整集弹幕，start/duration 仅用于本地过滤。
 	// 集号必须用真实分集序号：原先按时间偏移推算，恒等于 1，
@@ -334,7 +338,9 @@ func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID str
 	}
 	values := url.Values{}
 	values.Set("series_id", seriesID)
-	values.Set("vid", videoID)
+	if hongguoNumericID.MatchString(videoID) {
+		values.Set("vid", videoID)
+	}
 	values.Set("ep", strconv.Itoa(episode))
 	body, err := d.hongguotvRequest(ctx, "/danmaku", values)
 	if err != nil {
@@ -344,7 +350,7 @@ func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID str
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
 		return hongguoDanmakuPage{}, fmt.Errorf("弹幕返回格式异常: %w", err)
 	}
-	page := hongguoDanmakuPage{EpisodeID: videoID, StartMS: start, NextMS: start + duration, Total: int64(len(payload.Items))}
+	page := hongguoDanmakuPage{EpisodeID: videoID, StartMS: start, NextMS: min(duration, start+danmakuWindowMS), Total: int64(len(payload.Items)), Items: []hongguoDanmakuItem{}}
 	seen := map[string]bool{}
 	for index, item := range payload.Items {
 		text := strings.TrimSpace(item.Text)
@@ -352,7 +358,7 @@ func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID str
 			continue
 		}
 		timeMS := int64(item.T * 1000)
-		if timeMS < start || timeMS >= start+duration {
+		if timeMS < start || timeMS >= page.NextMS {
 			continue
 		}
 		id := fmt.Sprintf("%s-%d-%d", videoID, timeMS, index)
@@ -365,6 +371,10 @@ func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID str
 			Text:   truncate(text, 200),
 			TimeMS: timeMS,
 		})
+	}
+	sort.SliceStable(page.Items, func(i, j int) bool { return page.Items[i].TimeMS < page.Items[j].TimeMS })
+	if len(page.Items) > 90 {
+		page.Items = page.Items[:90]
 	}
 	return page, nil
 }

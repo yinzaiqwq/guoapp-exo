@@ -136,6 +136,7 @@ type nativeCatalogResult struct {
 }
 
 type nativePlan struct {
+	DanmakuSource    string            `json:"danmakuSource,omitempty"`
 	ServerDownloaded bool              `json:"serverDownloaded,omitempty"`
 	ExpiresAt        int64             `json:"expiresAt,omitempty"`
 	PrefetchedBytes  int64             `json:"prefetchedBytes,omitempty"`
@@ -460,7 +461,7 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "deleteServerDownload":
 		return engine.downloader.serverDownloadDelete(ctx, input.Directory, input.Command)
 	case "serverDownloadPlayback":
-		return engine.downloader.serverDownloadPlan(input.Directory, input.Command)
+		return engine.serverDownloadPlayback(ctx, input)
 	case "sourceStatus":
 		return engine.sourceStatus(input.Source), nil
 	case "sourceJob":
@@ -813,8 +814,19 @@ func (engine *nativeEngine) registerLocalPlayback(plan *nativePlan, input native
 		choice.danmakuSeries, choice.danmakuVideo = series, video
 		choice.danmakuSource = sourceHongguo
 	} else {
-		return
+		source, series, valid := splitProviderDramaID(input.Drama.ID)
+		if !valid || source != sourceHongguotv || !hongguoNumericID.MatchString(series) || input.Index < 1 {
+			return
+		}
+		choice.danmakuSeries, choice.danmakuSource = series, sourceHongguotv
+		choice.danmakuEpisode, _ = strconv.Atoi(input.Chapter.EpisodeString(input.Index))
+		if choice.danmakuEpisode < 1 {
+			return
+		}
+		choice.danmakuVideo = fmt.Sprintf("episode:%d", choice.danmakuEpisode)
 	}
+	plan.DanmakuSource = choice.danmakuSource
+	plan.DanmakuID = choice.danmakuVideo
 	token := make([]byte, 24)
 	if _, err := rand.Read(token); err != nil {
 		return
@@ -871,10 +883,13 @@ func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput
 	task := Task{DramaID: input.Drama.ID, DramaTitle: input.Drama.Title, Chapter: input.Chapter, Index: input.Index}
 	if plan, found, err := engine.downloader.preferredServerDownload(ctx, input); found || err != nil {
 		if err == nil {
-			if _, video, valid := hongguotvPlaybackIDs(task); valid {
-				plan.DanmakuID = video
-				engine.registerLocalPlayback(&plan, input)
-			}
+			engine.registerServerPlayback(&plan, input)
+		}
+		return plan, err
+	}
+	if plan, found, err := engine.downloader.preferredServerCache(ctx, input); found || err != nil {
+		if err == nil {
+			engine.registerServerPlayback(&plan, input)
 		}
 		return plan, err
 	}

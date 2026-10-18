@@ -41,9 +41,11 @@ void main() {
     final plan = PlaybackPlan.fromJson({
       'url': 'http://synthetic.test/download/file',
       'serverDownloaded': true,
+      'danmakuSource': 'hongguotv',
       'local': false,
     });
     expect(plan.serverDownloaded, isTrue);
+    expect(plan.danmakuSource, 'hongguotv');
     expect(plan.local, isFalse);
     expect(
       PlaybackPlan.fromJson({
