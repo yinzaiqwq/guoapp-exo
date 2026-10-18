@@ -38,14 +38,9 @@ class SourceSite {
     '韩小圈',
     '韩剧 · 韩国电影 · 综艺动漫',
   );
-  static const hongguotv = SourceSite(
-    'hongguotv',
-    '红果TV',
-    '自建服务 · 解密转码',
-  );
+  static const hongguotv = SourceSite('hongguotv', '红果TV', '自建服务 · 解密转码');
 
-  /// 默认可见的站源：红果、韩小圈、鬼片网、青空次元。
-  static const primaryValues = [hongguo, hongguotv];
+  static const primaryValues = [hongguotv];
 
   /// 敏感站源：默认隐藏，输入解锁密码后才显示。
   static const restrictedValues = [
@@ -60,12 +55,13 @@ class SourceSite {
     SourceSite('huangguoai', '黄果 AI', 'AI 短剧'),
     SourceSite('cloudfront', '黄果旧版', '旧 API 剧库'),
   ];
-  static const knownValues = [...primaryValues, ...restrictedValues];
-  static const allValues = [...primaryValues, ...restrictedValues];
+  static const knownValues = [hongguo, ...primaryValues, ...restrictedValues];
+  static const allValues = knownValues;
   static const values = allSourcesEnabled
-      ? knownValues
-      : [hongguo, hongguotv];
-  static bool isAvailable(String id) => values.any((site) => site.id == id);
+      ? [...primaryValues, ...restrictedValues]
+      : primaryValues;
+  static bool isAvailable(String id) =>
+      id == hongguo.id || values.any((site) => site.id == id);
   static bool isKnown(String id) => allValues.any((site) => site.id == id);
   static bool isPrimary(String id) =>
       primaryValues.any((site) => site.id == id);
@@ -78,7 +74,7 @@ class SourceSite {
       if (unlocked || isPrimary(site.id)) site,
   ];
   static SourceSite byId(String id) =>
-      allValues.firstWhere((site) => site.id == id, orElse: () => hongguo);
+      allValues.firstWhere((site) => site.id == id, orElse: () => hongguotv);
 }
 
 class SourceGroup {

@@ -80,7 +80,7 @@ class _ServerDownloadsScreenState extends State<ServerDownloadsScreen> {
         ],
       ),
     );
-    if (confirmed != true || _busy) return;
+    if (confirmed != true || _busy || !mounted) return;
 
     setState(() => _busy = true);
     try {

@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 
 import 'app_layout.dart';
 import 'app_bottom_navigation.dart';
-import 'app_build.dart';
 import 'core_bridge.dart';
 import 'catalog_filters.dart';
 import 'catalog_browser.dart';
@@ -415,6 +414,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleBack() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? false)) return;
     FocusManager.instance.primaryFocus?.unfocus();
     DiaryService.add(
       '[Back] tab=$_tab sel=$_selectionMode searchVis=$_searchVisible q="${_search.text}"',
@@ -820,7 +820,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _group.sources.any((source) => source.id == 'huangdou');
   bool get _hideVip => _supportsVipFilter && widget.store.hideVip;
 
-  List<Drama> get _visible {
+  List<Drama> get _visible => _visibleFor(widget.store.catalogView);
+
+  List<Drama> _visibleFor(CatalogView view) {
     final query = _search.text.trim().toLowerCase();
     return sortCatalog(
       _items.where((drama) {
@@ -836,7 +838,7 @@ class _HomeScreenState extends State<HomeScreen> {
             query.isEmpty ||
             matchesDramaQuery(drama, query);
       }),
-      widget.store.catalogView,
+      view,
     );
   }
 
@@ -1206,6 +1208,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _catalog({required bool selectionInBody}) {
     final items = _visible;
+    final hiddenByRelease =
+        items.isEmpty &&
+        widget.store.catalogView.release.isNotEmpty &&
+        _visibleFor(widget.store.catalogView.copyWith(release: '')).isNotEmpty;
+    final searchSummary = _onlineSearch && _submittedQuery.isNotEmpty
+        ? '站源：${_group.name} · 关键词：$_submittedQuery · 已载入 ${_items.length} 部\n'
+        : '';
     final television = AppLayout.isTelevision(context);
     return Column(
       children: [
@@ -1326,14 +1335,29 @@ class _HomeScreenState extends State<HomeScreen> {
                           : null,
                       icon: Icons.wifi_off_rounded,
                     )
+                  : hiddenByRelease
+                  ? StatusPanel(
+                      title: '结果被筛选条件隐藏',
+                      message:
+                          '$searchSummary已有剧集返回，但不符合当前完结状态筛选。站源未提供状态的剧集也会被隐藏。',
+                      action: '清除完结状态筛选',
+                      onRetry: () => saveUserChange(
+                        context,
+                        () => widget.store.setCatalogView(
+                          widget.store.catalogView.copyWith(release: ''),
+                        ),
+                      ),
+                    )
                   : items.isEmpty
                   ? StatusPanel(
                       title: '没有找到匹配的短剧',
-                      message: _hideVip
-                          ? '可以换个搜索词，或显示 VIP 内容。'
-                          : widget.store.sources.length > 1
-                          ? '可以换个搜索词或切换站源。'
-                          : '可以换个搜索词，或刷新后重试。',
+                      message:
+                          searchSummary +
+                          (_hideVip
+                              ? '可以换个搜索词，或显示 VIP 内容。'
+                              : widget.store.sources.length > 1
+                              ? '可以换个搜索词或切换站源。'
+                              : '可以换个搜索词，或刷新后重试。'),
                       onRetry:
                           _hasMore &&
                               !_loadingMore &&

@@ -144,7 +144,16 @@ func (d *Downloader) fetchHongguotvCatalogPage(ctx context.Context, page int, ca
 			EpisodeCount: row.EpisodeCnt, TotalEpisode: row.EpisodeCnt,
 		})
 	}
-	hasMore := payload.Page*payload.Pagesize < payload.Total && len(payload.Items) > 0
+	if payload.Page > 0 && payload.Page != page {
+		return nil, false, errors.New("红果TV 返回的分页不一致，请重试")
+	}
+	if payload.Pagesize <= 0 {
+		payload.Pagesize = hongguotvPageSize
+	}
+	hasMore := page*payload.Pagesize < payload.Total
+	if len(payload.Items) == 0 && (page-1)*payload.Pagesize < payload.Total {
+		return nil, false, errors.New("红果TV 目录分页不完整，请重试")
+	}
 	return items, hasMore, nil
 }
 
@@ -206,11 +215,11 @@ func (d *Downloader) fetchHongguotvDetail(ctx context.Context, sourceID string) 
 			episodeTitle = fmt.Sprintf("第%d集", index)
 		}
 		chapters = append(chapters, Chapter{
-			ID:       providerChapterID(sourceHongguotv, sourceID, vid),
-			Source:   sourceHongguotv,
-			Title:    truncate(episodeTitle, 512),
-			PageURL:  providerDramaID(sourceHongguotv, vid),
-			Referer:  d.providerBaseURL(sourceHongguotv) + "/",
+			ID:        providerChapterID(sourceHongguotv, sourceID, vid),
+			Source:    sourceHongguotv,
+			Title:     truncate(episodeTitle, 512),
+			PageURL:   providerDramaID(sourceHongguotv, vid),
+			Referer:   d.providerBaseURL(sourceHongguotv) + "/",
 			MediaSize: int64(episode.Duration),
 		})
 	}
@@ -328,4 +337,3 @@ func (d *Downloader) hongguotvDanmaku(ctx context.Context, seriesID, videoID str
 	}
 	return page, nil
 }
-

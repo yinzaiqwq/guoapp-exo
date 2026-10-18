@@ -1,10 +1,11 @@
 package com.duanju.duanju_app
 
 import android.app.Activity
-import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -14,6 +15,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.EditText
@@ -158,6 +160,7 @@ class NativePlayerActivity : Activity() {
     private var currentQuality = 0
     private var selectedQuality = 0
     private var backArmed = false
+    private var settingsDialog: Dialog? = null
     private val danmakuPreferences by lazy { getSharedPreferences("tv_danmaku", MODE_PRIVATE) }
 
     private fun applyDanmakuSettings() {
@@ -168,6 +171,82 @@ class NativePlayerActivity : Activity() {
             danmakuPreferences.getFloat("duration", 9_000f),
             danmakuPreferences.getString("blocked", "").orEmpty(),
         )
+    }
+
+    private fun settingsButton(label: String, action: () -> Unit) = Button(this).apply {
+        text = label
+        textSize = 20f
+        isAllCaps = false
+        isFocusable = true
+        isFocusableInTouchMode = true
+        minHeight = dp(56)
+        setTextColor(Color.WHITE)
+        background = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), GradientDrawable().apply {
+                setColor(Color.rgb(30, 110, 205))
+                cornerRadius = dp(8).toFloat()
+            })
+            addState(intArrayOf(), GradientDrawable().apply {
+                setColor(Color.rgb(52, 57, 72))
+                cornerRadius = dp(8).toFloat()
+            })
+        }
+        setOnClickListener { if (!isFinishing && !isDestroyed) action() }
+    }
+
+    private fun showSettingsDialog(
+        title: String,
+        content: View,
+        initialFocus: View,
+        closeLabel: String,
+        onClose: (() -> Unit)? = null,
+    ) {
+        if (isFinishing || isDestroyed) return
+        settingsDialog?.dismiss()
+        val dialog = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(30, 33, 45))
+                cornerRadius = dp(16).toFloat()
+            }
+        }
+        layout.addView(TextView(this).apply {
+            text = title
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            setPadding(dp(8), dp(4), dp(8), dp(12))
+        })
+        val scroll = ScrollView(this).apply {
+            isFocusable = false
+            addView(content)
+        }
+        layout.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        layout.addView(settingsButton(closeLabel) {
+            dialog.dismiss()
+            onClose?.invoke()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        dialog.setContentView(layout)
+        dialog.setOnCancelListener { onClose?.invoke() }
+        dialog.setOnDismissListener {
+            if (settingsDialog === dialog) settingsDialog = null
+        }
+        settingsDialog = dialog
+        dialog.setOnShowListener {
+            initialFocus.post {
+                if (settingsDialog === dialog && !isFinishing && !isDestroyed) {
+                    initialFocus.requestFocus()
+                }
+            }
+        }
+        dialog.show()
+        val metrics = resources.displayMetrics
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setLayout(minOf(dp(640), (metrics.widthPixels * 0.9f).toInt()), (metrics.heightPixels * 0.82f).toInt())
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
     }
 
     private fun chooseDanmakuValue(title: String, key: String, labels: Array<String>, values: FloatArray) {
@@ -183,29 +262,14 @@ class NativePlayerActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        lateinit var dialog: AlertDialog
         labels.forEachIndexed { index, label ->
-            content.addView(Button(this).apply {
-                text = if (index == selected) "✓ $label" else label
-                textSize = 20f
-                isAllCaps = false
-                isFocusable = true
-                minHeight = dp(56)
-                setOnClickListener {
-                    danmakuPreferences.edit().putFloat(key, values[index]).apply()
-                    applyDanmakuSettings()
-                    dialog.dismiss()
-                    this@NativePlayerActivity.handler.postDelayed({ showDanmakuSettings() }, 150)
-                }
+            content.addView(settingsButton(if (index == selected) "✓ $label" else label) {
+                danmakuPreferences.edit().putFloat(key, values[index]).apply()
+                applyDanmakuSettings()
+                showDanmakuSettings()
             })
         }
-        dialog = AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(content)
-            .setNegativeButton("返回") { _, _ -> handler.postDelayed({ showDanmakuSettings() }, 150) }
-            .create()
-        dialog.setOnShowListener { content.getChildAt(selected)?.requestFocus() }
-        dialog.show()
+        showSettingsDialog(title, content, content.getChildAt(selected), "返回", ::showDanmakuSettings)
     }
 
     private fun showDanmakuSettings() {
@@ -234,19 +298,8 @@ class NativePlayerActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        lateinit var dialog: AlertDialog
         fun option(label: String, action: () -> Unit) {
-            content.addView(Button(this).apply {
-                text = label
-                textSize = 20f
-                isAllCaps = false
-                isFocusable = true
-                minHeight = dp(56)
-                setOnClickListener {
-                    dialog.dismiss()
-                    this@NativePlayerActivity.handler.postDelayed({ action() }, 150)
-                }
-            })
+            content.addView(settingsButton(label, action))
         }
         option("显示区域 · $area") {
             chooseDanmakuValue("显示区域", "area", arrayOf("上方 1/4", "上方 1/3", "上方 1/2"), floatArrayOf(0.25f, 0.33f, 0.5f))
@@ -261,28 +314,44 @@ class NativePlayerActivity : Activity() {
             chooseDanmakuValue("滚动速度", "duration", arrayOf("快", "中", "慢"), floatArrayOf(6_000f, 9_000f, 12_000f))
         }
         option("屏蔽词 · $blocked") {
-            val input = EditText(this).apply {
+            lateinit var clear: Button
+            val input = object : EditText(this) {
+                override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+                    if (keyCode != KeyEvent.KEYCODE_DPAD_DOWN) return super.onKeyPreIme(keyCode, event)
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
+                            ?.hideSoftInputFromWindow(windowToken, 0)
+                        clear.requestFocus()
+                    }
+                    return true
+                }
+            }.apply {
                 setSingleLine(false)
                 setText(danmakuPreferences.getString("blocked", ""))
                 hint = "多个关键词用逗号分隔"
             }
-            AlertDialog.Builder(this)
-                .setTitle("屏蔽词")
-                .setView(input)
-                .setPositiveButton("保存") { _, _ ->
+            clear = settingsButton("清空输入") { input.setText("") }
+            input.setOnKeyListener { _, keyCode, event ->
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if (event.action == KeyEvent.ACTION_DOWN) clear.requestFocus()
+                    true
+                } else {
+                    false
+                }
+            }
+            val editor = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(input)
+                addView(clear)
+                addView(settingsButton("保存") {
                     danmakuPreferences.edit().putString("blocked", input.text.toString()).apply()
                     applyDanmakuSettings()
-                }
-                .setNegativeButton("取消", null)
-                .show()
+                    showDanmakuSettings()
+                })
+            }
+            showSettingsDialog("屏蔽词", editor, input, "取消", ::showDanmakuSettings)
         }
-        dialog = AlertDialog.Builder(this)
-            .setTitle("弹幕设置")
-            .setView(content)
-            .setNegativeButton("关闭", null)
-            .create()
-        dialog.setOnShowListener { content.getChildAt(0)?.requestFocus() }
-        dialog.show()
+        showSettingsDialog("弹幕设置", content, content.getChildAt(0), "关闭")
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -963,10 +1032,9 @@ class NativePlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(tick)
-        handler.removeCallbacks(hideHint)
-        handler.removeCallbacks(disarmBack)
-        handler.removeCallbacks(hideProgress)
+        settingsDialog?.dismiss()
+        settingsDialog = null
+        handler.removeCallbacksAndMessages(null)
         if (current?.get() === this) current = null
         acceptingDanmaku = false
         pendingDanmaku = null
@@ -977,5 +1045,11 @@ class NativePlayerActivity : Activity() {
         player?.release()
         player = null
         super.onDestroy()
+    }
+
+    override fun finish() {
+        settingsDialog?.dismiss()
+        settingsDialog = null
+        super.finish()
     }
 }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -1307,14 +1306,30 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       // 原生播放器自身的失败原因（解密、解码、网络）比通用提示更有意义
       if (mpvHasContent && !_closed && _foreground) _player.play();
-      _notice(error.message);
+      if (!mpvHasContent && mounted && !_closed) {
+        setState(() {
+          _loading = false;
+          _error = error.message;
+        });
+      } else {
+        _notice(error.message);
+      }
       return;
-    } catch (_) {
+    } catch (error) {
       if (_nativeDanmakuGeneration == danmakuTicket) {
         _nativeDanmakuGeneration++;
       }
       // 其他异常恢复内置播放后交给上层处理，避免停留在已暂停状态
       if (mpvHasContent && !_closed && _foreground) _player.play();
+      if (!mpvHasContent && mounted && !_closed) {
+        setState(() {
+          _loading = false;
+          _error = error is PlatformException
+              ? error.message ?? '系统播放器未能启动，请重试'
+              : '系统播放器未能启动，请重试';
+        });
+        return;
+      }
       rethrow;
     } finally {
       _nativePlaybackActive = false;
@@ -1360,9 +1375,15 @@ class _PlayerScreenState extends State<PlayerScreen>
         await _seekTo(result.position);
       }
       _player.play();
-    } else if (mounted) {
-      // 自动路由：mpv 无内容，保持暂停并同步一次 UI 进度
-      setState(() {});
+    } else if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      } else {
+        setState(() {
+          _loading = false;
+          _error = '播放已结束，可重新播放或返回剧集列表';
+        });
+      }
     }
   }
 
@@ -1730,6 +1751,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _back() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? false)) return;
     if (_showFullscreen && !_television) {
       _rotate();
     } else {
@@ -2019,13 +2041,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                 widget.videoBuilder!(layeredControls)
               else if (_player is LunaExoPlayer)
                 LunaExoVideoView(
-                  player: _player as LunaExoPlayer,
+                  player: _player,
                   fit: BoxFit.contain,
                   controls: (_) => layeredControls,
                 )
               else if (_video != null)
                 Video(
-                  controller: _video!,
+                  controller: _video,
                   fit: BoxFit.contain,
                   controls: (_) => layeredControls,
                 )

@@ -688,6 +688,7 @@ class DownloadsScreenState extends State<DownloadsScreen> {
   /// 内嵌在底部 Tab 时由外层首页调用此方法，从而避免外层直接 pop
   /// 导致退出应用。
   bool handleBack() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? false)) return false;
     final searchFocused = _searchFocus.hasFocus;
     _searchFocus.unfocus();
     DiaryService.add('[DL-Back] selecting=$_selecting q="${_search.text}"');
@@ -708,6 +709,7 @@ class DownloadsScreenState extends State<DownloadsScreen> {
 
   /// 未内嵌时的返回：交给 handleBack，未消费则关闭页面。
   void _back() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? false)) return;
     if (handleBack()) return;
     Navigator.of(context).maybePop();
   }
@@ -748,20 +750,36 @@ class DownloadsScreenState extends State<DownloadsScreen> {
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: TextField(
-            controller: _search,
-            focusNode: _searchFocus,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              hintText: '搜索剧名、站源或分类',
-              prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: _search.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: '清空搜索',
-                      onPressed: () => setState(_search.clear),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
+          child: Focus(
+            onKeyEvent: (_, event) {
+              if (!AppLayout.isTelevision(context) || event is! KeyDownEvent) {
+                return KeyEventResult.ignored;
+              }
+              final direction = switch (event.logicalKey) {
+                LogicalKeyboardKey.arrowDown => TraversalDirection.down,
+                LogicalKeyboardKey.arrowUp => TraversalDirection.up,
+                _ => null,
+              };
+              if (direction == null) return KeyEventResult.ignored;
+              SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+              _searchFocus.focusInDirection(direction);
+              return KeyEventResult.handled;
+            },
+            child: TextField(
+              controller: _search,
+              focusNode: _searchFocus,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: '搜索剧名、站源或分类',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _search.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: '清空搜索',
+                        onPressed: () => setState(_search.clear),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+              ),
             ),
           ),
         ),

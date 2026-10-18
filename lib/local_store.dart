@@ -136,7 +136,10 @@ class LocalStore extends ChangeNotifier {
       !locked &&
       SourceSite.isAvailable(source) &&
       profile.allows(source) &&
-      (_gateOff || _sourcesUnlocked || SourceSite.isPrimary(source));
+      (_gateOff ||
+          _sourcesUnlocked ||
+          source == SourceSite.hongguo.id ||
+          SourceSite.isPrimary(source));
   List<SourceSite> get sources => SourceSite.visibleValues(
     unlocked: _gateOff || _sourcesUnlocked,
   ).where((site) => allowsSource(site.id)).toList();
@@ -529,7 +532,9 @@ class LocalStore extends ChangeNotifier {
       _setting('forceLogin', value, admin: true);
   Future<void> setHideVip(bool value) => _setting(_key('hideVip'), value);
   Future<void> setSource(String value) {
-    if (!allowsSource(value)) return Future.error(StateError('当前用户没有此站源权限'));
+    if (!sources.any((source) => source.id == value)) {
+      return Future.error(StateError('当前用户没有此站源权限'));
+    }
     return _setting(_key('source'), value);
   }
 

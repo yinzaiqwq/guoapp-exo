@@ -432,7 +432,7 @@ class NativeRepository extends AppRepository {
         ]
         .where(
           (board) =>
-              SourceSite.isAvailable(board.source) &&
+              SourceSite.values.any((source) => source.id == board.source) &&
               (access?.allowsSource(board.source) ?? true),
         )
         .toList();
@@ -631,9 +631,9 @@ class NativeRepository extends AppRepository {
         'catalog' || 'categories' => 15,
         _ => 70,
       };
-      final encoded = await Isolate.run(() => _nativeRequest(body)).timeout(
-        Duration(seconds: timeoutSeconds),
-      );
+      final encoded = await Isolate.run(
+        () => _nativeRequest(body),
+      ).timeout(Duration(seconds: timeoutSeconds));
       final response = jsonDecode(encoded) as Map<String, dynamic>;
       if (response['ok'] != true) {
         throw AppFailure(
