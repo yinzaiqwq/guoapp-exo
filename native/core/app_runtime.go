@@ -136,18 +136,19 @@ type nativeCatalogResult struct {
 }
 
 type nativePlan struct {
-	ExpiresAt       int64             `json:"expiresAt,omitempty"`
-	PrefetchedBytes int64             `json:"prefetchedBytes,omitempty"`
-	DanmakuID       string            `json:"danmakuId,omitempty"`
-	Local           bool              `json:"local"`
-	URL             string            `json:"url"`
-	Headers         map[string]string `json:"headers"`
-	Key             string            `json:"decryptionKey,omitempty"`
-	Quality         int               `json:"quality"`
-	Qualities       []int             `json:"qualities"`
-	Session         string            `json:"session,omitempty"`
-	RouteIndex      int               `json:"routeIndex"`
-	RouteCount      int               `json:"routeCount"`
+	ServerDownloaded bool              `json:"serverDownloaded,omitempty"`
+	ExpiresAt        int64             `json:"expiresAt,omitempty"`
+	PrefetchedBytes  int64             `json:"prefetchedBytes,omitempty"`
+	DanmakuID        string            `json:"danmakuId,omitempty"`
+	Local            bool              `json:"local"`
+	URL              string            `json:"url"`
+	Headers          map[string]string `json:"headers"`
+	Key              string            `json:"decryptionKey,omitempty"`
+	Quality          int               `json:"quality"`
+	Qualities        []int             `json:"qualities"`
+	Session          string            `json:"session,omitempty"`
+	RouteIndex       int               `json:"routeIndex"`
+	RouteCount       int               `json:"routeCount"`
 }
 
 type nativeEngine struct {
@@ -785,7 +786,7 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		}
 	}
 	drama.Source, drama.SourceID, drama.Episodes = source, sourceID, len(chapters)
-	if source == sourceHuangju || source == sourceYeguo {
+	if source == sourceHuangju || source == sourceYeguo || source == sourceHongguotv {
 		drama.Episodes = max(drama.Episodes, nativeNormalize(raw).Episodes)
 	}
 	warning := ""
@@ -868,6 +869,15 @@ func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput
 		}
 	}
 	task := Task{DramaID: input.Drama.ID, DramaTitle: input.Drama.Title, Chapter: input.Chapter, Index: input.Index}
+	if plan, found, err := engine.downloader.preferredServerDownload(ctx, input); found || err != nil {
+		if err == nil {
+			if _, video, valid := hongguotvPlaybackIDs(task); valid {
+				plan.DanmakuID = video
+				engine.registerLocalPlayback(&plan, input)
+			}
+		}
+		return plan, err
+	}
 	media, err := engine.downloader.resolveProviderMedia(ctx, task)
 	if err != nil {
 		return nativePlan{}, err

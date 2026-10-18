@@ -15,87 +15,95 @@ import 'fixtures.dart';
 import 'player_fixtures.dart';
 
 void main() {
-  testWidgets(
-    'native progress updates history and survives reopening storage',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      final result = Completer<Map<String, Object>>();
-      messenger.setMockMethodCallHandler(AppDevice.channel, (call) async {
-        if (call.method == 'openNativePlayer') return result.future;
-        return null;
-      });
-      SharedPreferences.setMockInitialValues({});
-      final preferences = await SharedPreferences.getInstance();
-      final store = LocalStore(preferences);
-      final repository = RouteRepository();
-      final detail = await repository.detail(FixtureRepository.free);
-      final player = ScriptedPlayer();
-      try {
-        await tester.pumpWidget(
-          MaterialApp(
-            home: PlayerScreen(
-              detail: detail,
-              initialIndex: 1,
-              repository: repository,
-              store: store,
-              nativePlayback: true,
-              playerFactory: () => Player(platformPlayer: player),
-              videoBuilder: (controls) => controls,
-            ),
-          ),
-        );
-        for (var i = 0; i < 20; i++) {
-          await tester.pump(const Duration(milliseconds: 10));
-        }
-        expect(player.opened, isEmpty);
-        final response = Completer<void>();
-        messenger.handlePlatformMessage(
-          'duanju/native_progress',
-          const StandardMethodCodec().encodeMethodCall(
-            const MethodCall('nativePlaybackProgress', {
-              'positionMs': 23000,
-              'durationMs': 120000,
-            }),
-          ),
-          (_) => response.complete(),
-        );
-        for (var i = 0; i < 20; i++) {
-          await tester.pump(const Duration(milliseconds: 10));
-        }
-        await response.future;
-        expect(store.history.first.episode, 2);
-        expect(store.watched(detail.drama.id)!.position, 23);
-        result.complete({
-          'positionMs': 41000,
-          'durationMs': 120000,
-          'completed': false,
+  for (final serverDownloaded in [false, true]) {
+    testWidgets(
+      'native progress updates history and survives reopening storage server=$serverDownloaded',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        final result = Completer<Map<String, Object>>();
+        messenger.setMockMethodCallHandler(AppDevice.channel, (call) async {
+          if (call.method == 'openNativePlayer') return result.future;
+          return null;
         });
-        for (var i = 0; i < 20; i++) {
-          await tester.pump(const Duration(milliseconds: 10));
+        SharedPreferences.setMockInitialValues({});
+        final preferences = await SharedPreferences.getInstance();
+        final store = LocalStore(preferences);
+        final repository = RouteRepository();
+        final detail = await repository.detail(FixtureRepository.free);
+        final player = ScriptedPlayer();
+        try {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: PlayerScreen(
+                detail: detail,
+                initialIndex: 1,
+                repository: repository,
+                store: store,
+                nativePlayback: true,
+                planResolver: serverDownloaded
+                    ? (_) async => const PlaybackPlan(
+                        url: 'http://synthetic.test/download/file',
+                        serverDownloaded: true,
+                      )
+                    : null,
+                playerFactory: () => Player(platformPlayer: player),
+                videoBuilder: (controls) => controls,
+              ),
+            ),
+          );
+          for (var i = 0; i < 20; i++) {
+            await tester.pump(const Duration(milliseconds: 10));
+          }
+          expect(player.opened, isEmpty);
+          final response = Completer<void>();
+          messenger.handlePlatformMessage(
+            'duanju/native_progress',
+            const StandardMethodCodec().encodeMethodCall(
+              const MethodCall('nativePlaybackProgress', {
+                'positionMs': 23000,
+                'durationMs': 120000,
+              }),
+            ),
+            (_) => response.complete(),
+          );
+          for (var i = 0; i < 20; i++) {
+            await tester.pump(const Duration(milliseconds: 10));
+          }
+          await response.future;
+          expect(store.history.first.episode, 2);
+          expect(store.watched(detail.drama.id)!.position, 23);
+          result.complete({
+            'positionMs': 41000,
+            'durationMs': 120000,
+            'completed': false,
+          });
+          for (var i = 0; i < 20; i++) {
+            await tester.pump(const Duration(milliseconds: 10));
+          }
+          final reopened = LocalStore(preferences);
+          final watched = reopened.watched(detail.drama.id)!;
+          expect(watched.episode, 2);
+          expect(watched.position, 41);
+          expect(watched.duration, 120);
+          expect(watched.finished, isFalse);
+          await tester.pump(const Duration(seconds: 6));
+          expect(store.watched(detail.drama.id)!.position, 41);
+          reopened.dispose();
+        } finally {
+          if (!result.isCompleted) {
+            result.complete({'positionMs': 0, 'completed': false});
+          }
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 100));
+          messenger.setMockMethodCallHandler(AppDevice.channel, null);
+          debugDefaultTargetPlatformOverride = null;
+          store.dispose();
         }
-        final reopened = LocalStore(preferences);
-        final watched = reopened.watched(detail.drama.id)!;
-        expect(watched.episode, 2);
-        expect(watched.position, 41);
-        expect(watched.duration, 120);
-        expect(watched.finished, isFalse);
-        await tester.pump(const Duration(seconds: 6));
-        expect(store.watched(detail.drama.id)!.position, 41);
-        reopened.dispose();
-      } finally {
-        if (!result.isCompleted) {
-          result.complete({'positionMs': 0, 'completed': false});
-        }
-        await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump(const Duration(milliseconds: 100));
-        messenger.setMockMethodCallHandler(AppDevice.channel, null);
-        debugDefaultTargetPlatformOverride = null;
-        store.dispose();
-      }
-    },
-  );
+      },
+    );
+  }
   Future<void> settleOperations(WidgetTester tester) async {
     for (var i = 0; i < 12; i++) {
       await tester.pump(const Duration(milliseconds: 10));

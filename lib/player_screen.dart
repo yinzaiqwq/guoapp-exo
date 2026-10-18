@@ -1281,6 +1281,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         serverTranscode:
             widget.detail.drama.source == 'hongguotv' &&
             !plan.local &&
+            !plan.serverDownloaded &&
             widget.planResolver == null,
         speed: _speed,
         position: Duration(milliseconds: (seconds * 1000).round()),

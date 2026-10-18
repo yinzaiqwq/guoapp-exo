@@ -116,27 +116,39 @@ class _ServerDownloadsScreenState extends State<ServerDownloadsScreen> {
           'currentEpisode': episode.index,
         }, episode.index),
     ];
-    final seriesId = drama.seriesId.isEmpty ? drama.folder : drama.seriesId;
+    final seriesId = drama.seriesId.isEmpty
+        ? 'server-download/${Uri.encodeComponent(drama.folder)}'
+        : drama.seriesId;
     final detail = DramaDetail(
       Drama(
         id: 'hongguotv:$seriesId',
         source: 'hongguotv',
         sourceId: seriesId,
         title: drama.title,
-        episodes: episodes.length,
+        episodes: drama.totalEpisodes > 0
+            ? drama.totalEpisodes
+            : episodes.length,
       ),
       episodes,
     );
+    final watched =
+        widget.store.watched(detail.drama.id) ??
+        widget.store.mediaWatched('server-download:${drama.folder}');
+    final position =
+        watched?.episode == episodes[initialIndex].number &&
+            watched?.finished == false
+        ? watched!.position
+        : 0.0;
     try {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => PlayerScreen(
             detail: detail,
             initialIndex: initialIndex,
+            initialPosition: position,
             repository: widget.repository,
             store: widget.store,
             allowOnlineFallback: false,
-            mediaId: 'server-download:${drama.folder}',
             planResolver: (index) => widget.repository.serverDownloadPlayback(
               drama.folder,
               drama.episodes[index].filename,

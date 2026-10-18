@@ -170,8 +170,16 @@ func (d *Downloader) hongguotvEpisodes(ctx context.Context, seriesID string) (ho
 }
 
 func (d *Downloader) fetchHongguotvDetail(ctx context.Context, sourceID string) (Drama, []Chapter, error) {
+	if strings.HasPrefix(sourceID, "server-download/") {
+		return d.serverDownloadDetail(ctx, sourceID)
+	}
 	payload, err := d.hongguotvEpisodes(ctx, sourceID)
 	if err != nil {
+		if ctx.Err() == nil {
+			if drama, chapters, downloadErr := d.serverDownloadDetail(ctx, sourceID); downloadErr == nil {
+				return drama, chapters, nil
+			}
+		}
 		return Drama{}, nil, err
 	}
 	title := strings.TrimSpace(payload.Meta.Title)
@@ -201,15 +209,19 @@ func (d *Downloader) fetchHongguotvDetail(ctx context.Context, sourceID string) 
 			episodeTitle = fmt.Sprintf("第%d集", index)
 		}
 		chapters = append(chapters, Chapter{
-			ID:        providerChapterID(sourceHongguotv, sourceID, vid),
-			Source:    sourceHongguotv,
-			Title:     truncate(episodeTitle, 512),
-			PageURL:   providerDramaID(sourceHongguotv, vid),
-			Referer:   d.providerBaseURL(sourceHongguotv) + "/",
-			MediaSize: int64(episode.Duration),
+			CurrentEpisode: json.RawMessage(strconv.Itoa(index)),
+			ID:             providerChapterID(sourceHongguotv, sourceID, vid),
+			Source:         sourceHongguotv,
+			Title:          truncate(episodeTitle, 512),
+			PageURL:        providerDramaID(sourceHongguotv, vid),
+			Referer:        d.providerBaseURL(sourceHongguotv) + "/",
+			MediaSize:      int64(episode.Duration),
 		})
 	}
 	if len(chapters) == 0 {
+		if drama, downloaded, downloadErr := d.serverDownloadDetail(ctx, sourceID); downloadErr == nil {
+			return drama, downloaded, nil
+		}
 		return Drama{}, nil, errors.New("红果TV 未返回可播放分集")
 	}
 	return drama, chapters, nil

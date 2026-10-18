@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // serverInt 解析服务器返回的数值字段；它们可能是数字或字符串。
@@ -172,9 +176,115 @@ func (d *Downloader) serverDownloadPlan(folder string, filename string) (nativeP
 	values.Set("filename", filename)
 	values.Set("api_key", hongguotvAPIKey)
 	return nativePlan{
-		URL:        site + "/download/file?" + values.Encode(),
-		Headers:    map[string]string{"Referer": site + "/"},
-		Qualities:  []int{},
-		RouteCount: 1,
+		ServerDownloaded: true,
+		URL:              site + "/download/file?" + values.Encode(),
+		Headers:          map[string]string{"Referer": site + "/"},
+		Qualities:        []int{},
+		RouteCount:       1,
 	}, nil
+}
+
+func serverDownloadMatches(drama serverDownloadDrama, sourceID string) bool {
+	if strings.HasPrefix(sourceID, "server-download/") {
+		folder, err := url.PathUnescape(strings.TrimPrefix(sourceID, "server-download/"))
+		return err == nil && folder == drama.Folder
+	}
+	return drama.SeriesID != "" && drama.SeriesID == sourceID
+}
+
+func (d *Downloader) preferredServerDownload(ctx context.Context, input nativeInput) (nativePlan, bool, error) {
+	source, sourceID, valid := splitProviderDramaID(input.Drama.ID)
+	if !valid || source != sourceHongguotv {
+		return nativePlan{}, false, nil
+	}
+	lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	list, err := d.serverDownloadList(lookup)
+	if err != nil {
+		return nativePlan{}, false, ctx.Err()
+	}
+	number, err := strconv.Atoi(input.Chapter.EpisodeString(input.Index))
+	if err != nil || number < 1 {
+		return nativePlan{}, false, nil
+	}
+	var plans []nativePlan
+	for _, drama := range list.Dramas {
+		if !serverDownloadMatches(drama, sourceID) {
+			continue
+		}
+		for _, episode := range drama.Episodes {
+			if episode.Index != number {
+				continue
+			}
+			if plan, err := d.serverDownloadPlan(drama.Folder, episode.Filename); err == nil {
+				plans = append(plans, plan)
+			}
+		}
+	}
+	if len(plans) != 1 {
+		return nativePlan{}, false, nil
+	}
+	plan := plans[0]
+	request, err := http.NewRequestWithContext(lookup, http.MethodGet, plan.URL, nil)
+	if err != nil {
+		return nativePlan{}, false, err
+	}
+	request.Header.Set("Range", "bytes=0-0")
+	request.Header.Set("Referer", plan.Headers["Referer"])
+	response, err := d.doMediaRequest(request)
+	if err != nil {
+		return nativePlan{}, false, ctx.Err()
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
+		return nativePlan{}, false, nil
+	}
+	var first [1]byte
+	if _, err := io.ReadFull(response.Body, first[:]); err != nil {
+		return nativePlan{}, false, ctx.Err()
+	}
+	return plan, true, ctx.Err()
+}
+
+func (d *Downloader) serverDownloadDetail(ctx context.Context, sourceID string) (Drama, []Chapter, error) {
+	list, err := d.serverDownloadList(ctx)
+	if err != nil {
+		return Drama{}, nil, err
+	}
+	var matched []serverDownloadDrama
+	for _, drama := range list.Dramas {
+		if serverDownloadMatches(drama, sourceID) {
+			matched = append(matched, drama)
+		}
+	}
+	if len(matched) != 1 {
+		return Drama{}, nil, errors.New("无法唯一定位服务器下载的剧集")
+	}
+	item := matched[0]
+	var chapters []Chapter
+	seen := map[int]bool{}
+	for _, episode := range item.Episodes {
+		if episode.Index < 1 || seen[episode.Index] {
+			return Drama{}, nil, errors.New("服务器下载集号无效或重复")
+		}
+		if _, err := d.serverDownloadPlan(item.Folder, episode.Filename); err != nil {
+			return Drama{}, nil, err
+		}
+		seen[episode.Index] = true
+		chapters = append(chapters, Chapter{
+			ID:     providerChapterID(sourceHongguotv, sourceID, episode.Filename),
+			Source: sourceHongguotv, Title: fmt.Sprintf("第%d集", episode.Index),
+			CurrentEpisode: json.RawMessage(strconv.Itoa(episode.Index)),
+		})
+	}
+	sort.Slice(chapters, func(i, j int) bool {
+		left, _ := strconv.Atoi(chapters[i].EpisodeString(0))
+		right, _ := strconv.Atoi(chapters[j].EpisodeString(0))
+		return left < right
+	})
+	if len(chapters) == 0 {
+		return Drama{}, nil, errors.New("服务器上没有可播放的已下载分集")
+	}
+	return Drama{ID: providerDramaID(sourceHongguotv, sourceID), Source: sourceHongguotv,
+		SourceID: sourceID, Title: item.Title, EpisodeCount: max(item.TotalEpisodes, len(chapters))}, chapters, nil
 }

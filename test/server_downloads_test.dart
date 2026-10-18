@@ -1,4 +1,5 @@
 import 'package:duanju_app/local_store.dart';
+import 'package:duanju_app/models.dart';
 import 'package:duanju_app/server_downloads.dart';
 import 'package:duanju_app/server_downloads_screen.dart';
 import 'package:flutter/material.dart';
@@ -15,9 +16,7 @@ class _ServerDownloadRepository extends FixtureRepository {
         title: '合成短剧',
         seriesId: 'series-100',
         downloaded: 1,
-        episodes: [
-          ServerDownloadEpisode(index: 1, filename: 'episode-1.mp4'),
-        ],
+        episodes: [ServerDownloadEpisode(index: 1, filename: 'episode-1.mp4')],
       ),
     ],
   );
@@ -38,6 +37,21 @@ class _ServerDownloadRepository extends FixtureRepository {
 }
 
 void main() {
+  test('server download playback origin survives plan decoding', () {
+    final plan = PlaybackPlan.fromJson({
+      'url': 'http://synthetic.test/download/file',
+      'serverDownloaded': true,
+      'local': false,
+    });
+    expect(plan.serverDownloaded, isTrue);
+    expect(plan.local, isFalse);
+    expect(
+      PlaybackPlan.fromJson({
+        'url': 'http://synthetic.test/stream',
+      }).serverDownloaded,
+      isFalse,
+    );
+  });
   test('server download list keeps series and episode playback identity', () {
     final list = ServerDownloadList.fromJson({
       'dramas': [
