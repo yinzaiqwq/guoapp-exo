@@ -151,6 +151,7 @@ class AppDevice {
     String danmaku = '',
     List<int> qualities = const [],
     int quality = 0,
+    bool serverTranscode = false,
     double speed = 1,
     Duration position = Duration.zero,
     Future<void> Function(Duration position, Duration duration)? onProgress,
@@ -185,6 +186,7 @@ class AppDevice {
         'danmaku': danmaku,
         'qualities': qualities,
         'quality': quality,
+        'serverTranscode': serverTranscode,
         'speed': speed,
         'positionMs': position.inMilliseconds,
       });

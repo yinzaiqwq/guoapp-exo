@@ -77,6 +77,7 @@ class NativePlayerActivity : Activity() {
 
         /** 当前清晰度，用于在面板中标记。 */
         const val EXTRA_QUALITY = "quality"
+        const val EXTRA_SERVER_TRANSCODE = "serverTranscode"
 
         const val RESULT_POSITION_MS = "positionMs"
         const val RESULT_DURATION_MS = "durationMs"
@@ -429,7 +430,7 @@ class NativePlayerActivity : Activity() {
                     "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
             )
             .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(30_000)
+            .setReadTimeoutMs(if (intent.getBooleanExtra(EXTRA_SERVER_TRANSCODE, false)) 300_000 else 30_000)
             .setAllowCrossProtocolRedirects(true)
             .apply { if (referer.isNotEmpty()) setDefaultRequestProperties(mapOf("Referer" to referer)) }
 

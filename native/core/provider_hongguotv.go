@@ -6,25 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
-
-// 红果TV（hongguotv）原生站源：指向用户自建的 hongguo-api 服务。
-//
-// 该服务已在服务端完成「取流 + CENC 离线解密 + H.264 720p 转码」，
-// 客户端拿到的 /stream 是标准 MP4（支持 HTTP Range），无需本地解密，
-// 也绕开了红果 bytevc1/HEVC 在电视端无法硬解的问题。
-//
-// 上游接口（自建服务，默认 192.168.5.145:8000）：
-//   GET /catalog?category=&page=&pagesize=   全量剧库分页
-//   GET /episodes?series_id=                 剧集列表
-//   GET /stream?vid=&codec=h264&res=720      解密转码后的 MP4
-//   GET /search?q=&page=                     搜索
-//   GET /img?url=                            封面代理
-//
-// 鉴权：query 参数 api_key（服务端强制校验）。
 
 const (
 	hongguotvSiteBaseURL = "http://192.168.5.145:8000"
@@ -229,8 +215,6 @@ func (d *Downloader) fetchHongguotvDetail(ctx context.Context, sourceID string) 
 	return drama, chapters, nil
 }
 
-// resolveHongguotvMedia 直接返回服务端 /stream 地址。
-// 服务端已完成解密与 720p H.264 转码，客户端无需再处理 CENC。
 func (d *Downloader) resolveHongguotvMedia(ctx context.Context, task Task) (providerMedia, error) {
 	vid := strings.TrimSpace(task.Chapter.PageURL)
 	if _, sourceID, ok := splitProviderDramaID(vid); ok {
@@ -242,16 +226,51 @@ func (d *Downloader) resolveHongguotvMedia(ctx context.Context, task Task) (prov
 	site := d.providerBaseURL(sourceHongguotv)
 	values := url.Values{}
 	values.Set("vid", vid)
-	values.Set("codec", "h264")
-	values.Set("res", "720")
-	values.Set("api_key", hongguotvAPIKey)
-	duration := time.Duration(task.Chapter.MediaSize) * time.Second
-	return providerMedia{
-		URL:      site + "/stream?" + values.Encode(),
-		Referer:  site + "/",
-		Duration: duration,
-		Quality:  720,
-	}, nil
+	var payload struct {
+		Profile string `json:"profile"`
+		Items   []struct {
+			Quality int `json:"quality"`
+			Width   int `json:"width"`
+			Height  int `json:"height"`
+		} `json:"items"`
+	}
+	if err := d.hongguotvJSON(ctx, "/stream/qualities", values, &payload); err != nil {
+		return providerMedia{}, fmt.Errorf("获取真实清晰度失败，请确认红果TV服务已升级: %w", err)
+	}
+	if payload.Profile != "short-edge-v2" {
+		return providerMedia{}, errors.New("红果TV服务尚未支持真实高清转码，请先升级服务")
+	}
+	seen := map[int]bool{}
+	var variants []providerMedia
+	for _, item := range payload.Items {
+		switch item.Quality {
+		case 360, 480, 540, 720, 1080:
+		default:
+			continue
+		}
+		if seen[item.Quality] || item.Width < item.Quality || item.Height < item.Quality {
+			continue
+		}
+		seen[item.Quality] = true
+		query := url.Values{}
+		query.Set("vid", vid)
+		query.Set("codec", "h264")
+		query.Set("quality", strconv.Itoa(item.Quality)+"p")
+		query.Set("res", strconv.Itoa(item.Quality))
+		query.Set("api_key", hongguotvAPIKey)
+		variants = append(variants, providerMedia{
+			URL: site + "/stream?" + query.Encode(), Referer: site + "/",
+			Duration: time.Duration(task.Chapter.MediaSize) * time.Second,
+			Quality:  item.Quality,
+		})
+	}
+	if len(variants) == 0 {
+		return providerMedia{}, errors.New("红果TV未返回可确认真实分辨率的视频档位")
+	}
+	sort.Slice(variants, func(i, j int) bool { return variants[i].Quality > variants[j].Quality })
+	media := variants[0]
+	media.Variants = variants[1:]
+	return media, nil
 }
 
 func (d *Downloader) searchHongguotv(ctx context.Context, page int, query string) ([]Drama, bool, error) {

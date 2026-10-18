@@ -1278,6 +1278,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         danmaku: '',
         qualities: plan.qualities,
         quality: plan.quality,
+        serverTranscode:
+            widget.detail.drama.source == 'hongguotv' &&
+            !plan.local &&
+            widget.planResolver == null,
         speed: _speed,
         position: Duration(milliseconds: (seconds * 1000).round()),
         onProgress: (position, duration) async {
