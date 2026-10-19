@@ -204,6 +204,7 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Future<void> _download() async {
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
     final detail = _detail;
     if (detail == null ||
         !widget.store.canDownload ||
@@ -233,6 +234,9 @@ class _DetailScreenState extends State<DetailScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
+          persist: false,
+          showCloseIcon: true,
+          duration: const Duration(seconds: 3),
           content: Text(added == 0 ? '所选集数已在下载列表中' : '已加入 $added 集，已有任务自动跳过'),
           action: SnackBarAction(
             label: '查看',

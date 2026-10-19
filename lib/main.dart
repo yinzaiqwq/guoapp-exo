@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -25,7 +24,7 @@ import 'diary_service.dart';
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
-  DiaryService.add('[App] 应用启动，版本: 0.2.65+76, 平台: ${Platform.operatingSystem}');
+  DiaryService.add('[App] 应用启动，平台: ${Platform.operatingSystem}');
   if (Platform.isAndroid) {
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(AppTheme.systemBars(Brightness.dark));
@@ -41,6 +40,7 @@ Future<void> main(List<String> arguments) async {
     await runPackageSmoke(arguments);
     return;
   }
+  final device = AppDevice.detect();
   // 读取真实版本号：关于页与更新比对都依赖它，不能再靠硬编码常量
   try {
     final info = await PackageInfo.fromPlatform();
@@ -49,8 +49,7 @@ Future<void> main(List<String> arguments) async {
   } catch (_) {
     // 读取失败时保留占位值，不影响启动
   }
-  final device = await AppDevice.detect();
-  runApp(AppBootstrap(device: device));
+  runApp(AppBootstrap(device: await device));
 }
 
 class AppBootstrap extends StatefulWidget {
@@ -124,9 +123,12 @@ class _AppBootstrapState extends State<AppBootstrap>
       error = null;
     });
     try {
-      final preferences = await SharedPreferences.getInstance();
-      await _refreshDevice();
-      await repository.initialize();
+      final timer = Stopwatch()..start();
+      final (preferences, _) = await (
+        SharedPreferences.getInstance(),
+        repository.initialize(),
+      ).wait;
+      DiaryService.add('[App] 本地初始化完成，耗时 ${timer.elapsedMilliseconds}ms');
       if (mounted) {
         setState(() {
           store = LocalStore(preferences);

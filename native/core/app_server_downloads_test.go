@@ -1,15 +1,19 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -33,6 +37,115 @@ func TestServerDownloadPlan(t *testing.T) {
 	}
 	if plan.Local || plan.RouteCount != 1 || plan.Headers["Referer"] != "http://example.test:8000/" {
 		t.Fatalf("unexpected playback plan: %#v", plan)
+	}
+}
+
+func TestDownloadResolutionPrefersServerFilesAndCache(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		paths := []string{}
+		d := &Downloader{cfg: Config{Retries: 1}, limiter: newRequestLimiter(1, 0), client: &http.Client{Transport: suggestionTransport(func(r *http.Request) (*http.Response, error) {
+			paths = append(paths, r.URL.Path)
+			body, status := `{"items":[]}`, 200
+			switch r.URL.Path {
+			case "/download/list":
+				if !cached {
+					body = `{"items":[{"folder_name":"合成第二季","series_id":"100","episodes":[{"index":9,"filename":"009.mp4"}]}]}`
+				}
+			case "/stream/cache":
+				if !cached || r.URL.Query().Get("quality") != "1080" || r.URL.Query().Get("vid") != "999" {
+					t.Fatal("unexpected cache lookup")
+				}
+				body = `{"profile":"server-cache-v1","vid":"999","hit":true,"cacheId":"` + strings.Repeat("a", 64) + `","quality":1080,"width":1920,"height":1080}`
+			case "/download/file", "/stream/cache/file":
+				if r.Header.Get("Range") != "bytes=0-0" {
+					t.Fatal("missing preflight")
+				}
+				body, status = "x", 206
+			default:
+				t.Fatal("cached download must not resolve online media: " + r.URL.Path)
+			}
+			return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})}}
+		media, err := d.resolveDownloadMedia(context.Background(), nativeDownloadJob{
+			Drama: nativeDrama{ID: "hongguotv:100"}, Index: 1, Quality: 1080,
+			Chapter: Chapter{CurrentEpisode: json.RawMessage(`9`), PageURL: "hongguotv:999"},
+		})
+		if err != nil || media.URL == "" || media.Referer == "" {
+			t.Fatalf("download resolution failed: %v", err)
+		}
+		expected := []string{"/download/list", "/download/file"}
+		if cached {
+			expected = []string{"/download/list", "/stream/cache", "/stream/cache/file"}
+			if media.Quality != 1080 {
+				t.Fatal("lost actual cached resolution")
+			}
+		} else if media.Quality != 0 {
+			t.Fatal("unmeasured server file must not claim requested resolution")
+		}
+		if !reflect.DeepEqual(paths, expected) {
+			t.Fatalf("wrong download requests: %v", paths)
+		}
+	}
+}
+
+func TestDownloadResolutionCancellationDoesNotStartOnlineRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d := &Downloader{cfg: Config{Retries: 1}, limiter: newRequestLimiter(1, 0), client: &http.Client{Transport: suggestionTransport(func(r *http.Request) (*http.Response, error) {
+		t.Fatal("cancelled download contacted upstream")
+		return nil, context.Canceled
+	})}}
+	_, err := d.resolveDownloadMedia(ctx, nativeDownloadJob{Drama: nativeDrama{ID: "hongguotv:100"}, Index: 9})
+	if err != context.Canceled {
+		t.Fatalf("cancellation lost: %v", err)
+	}
+}
+
+func TestDownloadsCopyExistingServerBytesWithoutOnlineTranscoding(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(strconv.FormatBool(cached), func(t *testing.T) {
+			data := bytes.Repeat([]byte("synthetic-cached-video"), 1024)
+			var mediaReads atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/download/list":
+					if cached {
+						_, _ = io.WriteString(w, `{"items":[]}`)
+					} else {
+						_, _ = io.WriteString(w, `{"items":[{"folder_name":"合成第二季","series_id":"100","episodes":[{"index":9,"filename":"009.mp4"}]}]}`)
+					}
+				case "/stream/cache":
+					_, _ = io.WriteString(w, `{"profile":"server-cache-v1","vid":"999","hit":true,"cacheId":"`+strings.Repeat("a", 64)+`","quality":1080,"width":1920,"height":1080}`)
+				case "/download/file", "/stream/cache/file":
+					mediaReads.Add(1)
+					w.Header().Set("ETag", `"unchanged"`)
+					http.ServeContent(w, r, "media.mp4", time.Time{}, bytes.NewReader(data))
+				default:
+					t.Error("download triggered online request: " + r.URL.Path)
+					http.Error(w, "unexpected request", 500)
+				}
+			}))
+			defer upstream.Close()
+			manager := downloadTestManager(t)
+			manager.engine.downloader.cfg.HongguotvURL = upstream.URL
+			manager.engine.downloader.client = upstream.Client()
+			manager.engine.downloader.limiter = newRequestLimiter(1, 0)
+			input := nativeInput{Drama: nativeDrama{ID: "hongguotv:100", Source: sourceHongguotv, Title: "合成第二季"}, Quality: 1080,
+				Entries: []nativeDownloadEpisode{{Index: 9, Chapter: Chapter{CurrentEpisode: json.RawMessage(`9`), PageURL: "hongguotv:999"}}}}
+			if count, err := manager.enqueue(input); err != nil || count != 1 {
+				t.Fatalf("enqueue failed: %d %v", count, err)
+			}
+			jobs := waitDownloads(t, manager, func(jobs []nativeDownloadJob) bool {
+				return len(jobs) == 1 && jobs[0].State == "completed"
+			})
+			got, err := os.ReadFile(filepath.Join(manager.jobDirectory(jobs[0]), "media.mp4"))
+			if err != nil || !bytes.Equal(got, data) || mediaReads.Load() < 2 {
+				t.Fatalf("server bytes were not copied unchanged: %v", err)
+			}
+			if cached && jobs[0].ActualQuality != 1080 || !cached && jobs[0].ActualQuality != 0 {
+				t.Fatal("download resolution label is inaccurate")
+			}
+		})
 	}
 }
 

@@ -13,6 +13,7 @@ class RankingBoard {
   final String description;
   String get groupId => SourceSite.byId(source).groupId;
   static String sourceForID(String id) => switch (id) {
+    'hongguotv-recommend' || 'hongguotv-hot' || 'hongguotv-new' => 'hongguotv',
     'hongguo-hot' ||
     'hongguo-real' ||
     'hongguo-comic' ||

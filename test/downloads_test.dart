@@ -220,6 +220,12 @@ void main() {
           find.text(added == 0 ? '所选集数已在下载列表中' : '已加入 2 集，已有任务自动跳过'),
           findsOneWidget,
         );
+        final notice = tester.widget<SnackBar>(find.byType(SnackBar));
+        expect(notice.persist, isFalse);
+        expect(notice.showCloseIcon, isTrue);
+        await tester.pump(const Duration(seconds: 4));
+        await tester.pumpAndSettle();
+        expect(find.byType(SnackBar), findsNothing);
         expect(tester.takeException(), isNull);
       },
     );

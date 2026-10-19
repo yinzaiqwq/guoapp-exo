@@ -295,6 +295,27 @@ func (d *Downloader) preferredServerCache(ctx context.Context, input nativeInput
 	return plan, readable, ctx.Err()
 }
 
+func (d *Downloader) resolveDownloadMedia(ctx context.Context, job nativeDownloadJob) (providerMedia, error) {
+	if source, _, valid := splitProviderDramaID(job.Drama.ID); valid && source == sourceHongguotv {
+		input := nativeInput{Drama: job.Drama, Chapter: job.Chapter, Index: job.Index, Quality: job.Quality}
+		for _, lookup := range []func(context.Context, nativeInput) (nativePlan, bool, error){d.preferredServerDownload, d.preferredServerCache} {
+			plan, hit, err := lookup(ctx, input)
+			if err != nil {
+				return providerMedia{}, err
+			}
+			if hit {
+				return providerMedia{URL: plan.URL, Referer: plan.Headers["Referer"], Quality: plan.Quality,
+					Duration: time.Duration(job.Chapter.MediaSize) * time.Second}, nil
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return providerMedia{}, err
+	}
+	return d.resolveProviderMedia(ctx, Task{
+		DramaID: job.Drama.ID, DramaTitle: job.Drama.Title, Chapter: job.Chapter, Index: job.Index})
+}
+
 func (engine *nativeEngine) serverDownloadPlayback(ctx context.Context, input nativeInput) (nativePlan, error) {
 	if err := ctx.Err(); err != nil {
 		return nativePlan{}, err

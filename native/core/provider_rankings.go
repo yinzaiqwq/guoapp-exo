@@ -22,6 +22,9 @@ type rankingBoard struct {
 }
 
 var rankingBoards = []rankingBoard{
+	{ID: "hongguotv-recommend", Source: sourceHongguotv, Name: "漫剧推荐榜", Description: "红果TV服务返回的漫剧推荐榜，最多100部。", upstreamKey: "recommend"},
+	{ID: "hongguotv-hot", Source: sourceHongguotv, Name: "漫剧热播榜", Description: "红果TV服务返回的漫剧热播榜，最多100部。", upstreamKey: "hot"},
+	{ID: "hongguotv-new", Source: sourceHongguotv, Name: "漫剧新剧榜", Description: "红果TV服务返回的漫剧新剧榜，最多100部。", upstreamKey: "new"},
 	{ID: "hongguo-hot", Source: sourceHongguo, Name: "总热播榜", Description: "红果观看、互动等综合热度；每日更新。", path: "hot-drama", upstreamKey: "hongguo"},
 	{ID: "hongguo-real", Source: sourceHongguo, Name: "真人剧榜", Description: "红果真人剧热播榜；每日更新。", path: "hot-real-drama", upstreamKey: "real"},
 	{ID: "hongguo-comic", Source: sourceHongguo, Name: "漫剧榜", Description: "红果漫剧热播榜；每日更新。", path: "hot-comic-drama", upstreamKey: "comic"},
@@ -85,7 +88,7 @@ func cloneRankingPage(page rankingPage) rankingPage {
 }
 
 func singlePageRankingBoard(board rankingBoard) bool {
-	return board.Source == sourceHuangguoAI || board.Source == sourceDSD
+	return board.Source == sourceHuangguoAI || board.Source == sourceDSD || board.Source == sourceHongguotv
 }
 
 func rankingDramaWithoutImages(drama Drama) Drama {
@@ -162,6 +165,8 @@ func (d *Downloader) loadRankingPage(ctx context.Context, board rankingBoard, pa
 
 func (d *Downloader) fetchRankingPage(ctx context.Context, board rankingBoard, page int) (rankingPage, error) {
 	switch board.Source {
+	case sourceHongguotv:
+		return d.fetchHongguotvRanking(ctx, board, page)
 	case sourceHongguo:
 		return d.fetchHongguoRankingPage(ctx, board, page)
 	case sourceHuangdou:
