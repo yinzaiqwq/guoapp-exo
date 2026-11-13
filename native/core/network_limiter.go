@@ -11,6 +11,19 @@ import (
 	"time"
 )
 
+type providerResponseError struct {
+	host   string
+	status int
+	reason string
+}
+
+func (failure *providerResponseError) Error() string {
+	if failure.reason != "" {
+		return fmt.Sprintf("%s HTTP %d：%s", failure.host, failure.status, failure.reason)
+	}
+	return fmt.Sprintf("%s HTTP %d", failure.host, failure.status)
+}
+
 type requestGate struct {
 	busy      bool
 	lastStart time.Time
@@ -70,10 +83,7 @@ func (d *Downloader) catalogResponseError(request *http.Request, response *http.
 		}
 		d.limiter.mu.Unlock()
 	}
-	if reason != "" {
-		return fmt.Errorf("%s HTTP %d：%s", host, response.StatusCode, reason)
-	}
-	return fmt.Errorf("%s HTTP %d", host, response.StatusCode)
+	return &providerResponseError{host: host, status: response.StatusCode, reason: reason}
 }
 
 type requestLimiter struct {

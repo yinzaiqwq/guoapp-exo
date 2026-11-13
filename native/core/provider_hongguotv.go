@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"sort"
 	"strconv"
@@ -246,8 +247,23 @@ func (d *Downloader) resolveHongguotvMedia(ctx context.Context, task Task) (prov
 			Height  int `json:"height"`
 		} `json:"items"`
 	}
-	if err := d.hongguotvJSON(ctx, "/stream/qualities", values, &payload); err != nil {
-		return providerMedia{}, fmt.Errorf("获取真实清晰度失败，请确认红果TV服务已升级: %w", err)
+	lookupErr := d.hongguotvJSON(ctx, "/stream/qualities", values, &payload)
+	if lookupErr != nil && ctx.Err() == nil && hongguotvQualityRetryable(lookupErr) {
+		delay := time.NewTimer(800 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			delay.Stop()
+			return providerMedia{}, ctx.Err()
+		case <-delay.C:
+		}
+		lookupErr = d.hongguotvJSON(ctx, "/stream/qualities", values, &payload)
+	}
+	if lookupErr != nil {
+		var response *providerResponseError
+		if errors.As(lookupErr, &response) && response.status == 404 {
+			return providerMedia{}, fmt.Errorf("红果TV服务缺少清晰度接口，请升级服务: %w", lookupErr)
+		}
+		return providerMedia{}, fmt.Errorf("红果TV播放地址暂时获取失败，请稍后重试: %w", lookupErr)
 	}
 	if payload.Profile != "short-edge-v2" {
 		return providerMedia{}, errors.New("红果TV服务尚未支持真实高清转码，请先升级服务")
@@ -283,6 +299,20 @@ func (d *Downloader) resolveHongguotvMedia(ctx context.Context, task Task) (prov
 	media := variants[0]
 	media.Variants = variants[1:]
 	return media, nil
+}
+
+func hongguotvQualityRetryable(err error) bool {
+	var response *providerResponseError
+	if errors.As(err, &response) {
+		switch response.status {
+		case 500, 502, 503, 504:
+			return true
+		default:
+			return false
+		}
+	}
+	var network net.Error
+	return errors.As(err, &network) && (network.Timeout() || network.Temporary())
 }
 
 func (d *Downloader) searchHongguotv(ctx context.Context, page int, query string) ([]Drama, bool, error) {

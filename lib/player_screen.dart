@@ -167,8 +167,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       ? '自动'
       : '${_requestedQuality}P';
   String get _session => _plan?.session ?? '';
-  double get _currentPosition =>
-      _openedIndex == _index && _player.state.position.inMilliseconds > 0
+  double get _currentPosition => _nativePlaybackState != null
+      ? _nativePlaybackState!.position.inMilliseconds / 1000
+      : _openedIndex == _index && _player.state.position.inMilliseconds > 0
       ? _player.state.position.inMilliseconds / 1000
       : _resumePosition;
 
@@ -656,9 +657,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
     } catch (error) {
       if (mounted && !_closed) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.toString())));
       }
     } finally {
       if (mounted && !_closed) setState(() => _panelOpen = false);
@@ -667,14 +667,15 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _syncPreload() {
     if (_closed) return;
+    final native = _nativePlaybackState;
+    final nativeMode = _nativePlaybackActive || native != null;
     if (widget.planResolver != null ||
         !_preloadEnabled ||
-        !_foreground ||
         widget.localOnly ||
         _plan?.local == true ||
-        _loading ||
+        (!nativeMode && _loading) ||
         _error != null ||
-        _openedIndex != _index ||
+        (!nativeMode && _openedIndex != _index) ||
         widget.store.profileEpoch != _profileEpoch ||
         widget.store.locked ||
         _index + 1 >= widget.detail.episodes.length) {
@@ -682,16 +683,24 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
     final state = _player.state;
-    if (!state.playing || state.buffering || !_playIntent) {
+    final foreground = nativeMode ? native?.foreground == true : _foreground;
+    final playing = nativeMode
+        ? native?.playing == true
+        : state.playing && _playIntent;
+    final buffering = nativeMode ? native?.buffering != false : state.buffering;
+    if (!foreground || !playing || buffering) {
       _preloader.pause();
       return;
     }
-    final duration = state.duration.inMilliseconds;
-    final position = state.position.inMilliseconds;
+    final duration =
+        (nativeMode ? native!.duration : state.duration).inMilliseconds;
+    final position =
+        (nativeMode ? native!.position : state.position).inMilliseconds;
+    final buffer = (nativeMode ? native!.buffer : state.buffer).inMilliseconds;
     if (duration <= 0 ||
         position < 2000 ||
         (position < duration ~/ 2 && duration - position > 45000) ||
-        state.buffer.inMilliseconds - position < 5000) {
+        buffer - position < 5000) {
       return;
     }
     _preloader.prepare(
@@ -856,6 +865,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   bool _nativePlaybackActive = false;
+  NativePlaybackState? _nativePlaybackState;
 
   Future<void> _saveProgress({
     bool flush = false,
@@ -949,6 +959,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               )
             : null);
     _preloader.clear();
+    _nativePlaybackState = null;
     final ticket = ++_generation;
     _enhancement.suspend();
     _seekSequence++;
@@ -1256,6 +1267,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     final seconds = _currentPosition;
     final nativeIndex = _index;
     _nativePlaybackActive = true;
+    _nativePlaybackState = null;
+    _preloader.pause();
     if (mpvHasContent) _player.pause();
     final danmakuTicket = ++_nativeDanmakuGeneration;
     final NativePlaybackResult result;
@@ -1285,6 +1298,18 @@ class _PlayerScreenState extends State<PlayerScreen>
             widget.planResolver == null,
         speed: _speed,
         position: Duration(milliseconds: (seconds * 1000).round()),
+        onState: (state) {
+          if (_nativeDanmakuGeneration != danmakuTicket ||
+              _closed ||
+              !_nativePlaybackActive ||
+              state.episodeIndex != nativeIndex)
+            return;
+          _nativePlaybackState = state;
+          if (state.position > Duration.zero) {
+            _resumePosition = state.position.inMilliseconds / 1000;
+          }
+          _syncPreload();
+        },
         onProgress: (position, duration) async {
           if (_nativeDanmakuGeneration != danmakuTicket || _closed) return;
           await _saveProgress(
@@ -1306,6 +1331,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _nativeDanmakuGeneration++;
       }
     } on NativePlaybackFailure catch (error) {
+      _nativePlaybackState = null;
       if (_nativeDanmakuGeneration == danmakuTicket) {
         _nativeDanmakuGeneration++;
       }
@@ -1321,6 +1347,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       return;
     } catch (error) {
+      _nativePlaybackState = null;
       if (_nativeDanmakuGeneration == danmakuTicket) {
         _nativeDanmakuGeneration++;
       }
@@ -1376,6 +1403,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
     }
     if (mpvHasContent) {
+      _nativePlaybackState = null;
+      _playIntent = true;
       if (result.position > Duration.zero) {
         await _seekTo(result.position);
       }
@@ -1493,9 +1522,8 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _notice(String message) {
     if (!mounted || _closed) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _setPreferences(PlaybackPreferences preferences) async {
@@ -2279,9 +2307,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                   children: [
                     Text(
                       drama.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                      style: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     if (meta.isNotEmpty) ...[
                       const SizedBox(height: 6),

@@ -267,17 +267,15 @@ class MainActivity : FlutterActivity() {
                             val serverTranscode = call.argument<Boolean>("serverTranscode") ?: false
                             val speed = call.argument<Number>("speed")?.toFloat() ?: 1.0f
                             val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
+                            val sessionId = call.argument<Number>("sessionId")?.toLong() ?: 0L
                             if (url.isNullOrEmpty()) {
                                 result.error("invalid_url", "播放地址为空", null)
                             } else if (nativePlayerResult != null) {
                                 result.error("busy", "已有原生播放器在运行", null)
                             } else {
                                 nativePlayerResult = result
-                                NativePlayerActivity.progressListener = { position, duration ->
-                                    progressChannel?.invokeMethod("nativePlaybackProgress", mapOf(
-                                        "positionMs" to position,
-                                        "durationMs" to duration,
-                                    ))
+                                NativePlayerActivity.progressListener = { state ->
+                                    progressChannel?.invokeMethod("nativePlaybackProgress", state)
                                 }
                                 val intent = Intent(this, NativePlayerActivity::class.java).apply {
                                     putExtra(NativePlayerActivity.EXTRA_URL, url)
@@ -302,6 +300,7 @@ class MainActivity : FlutterActivity() {
                                         )
                                     }
                                     putExtra(NativePlayerActivity.EXTRA_POSITION_MS, positionMs)
+                                    putExtra(NativePlayerActivity.EXTRA_SESSION_ID, sessionId)
                                 }
                                 NativePlayerActivity.beginSession()
                                 startActivityForResult(intent, nativePlayerRequest)

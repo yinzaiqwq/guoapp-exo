@@ -58,6 +58,7 @@ ThemeData televisionTheme(ThemeData theme) {
 
 class AppDevice {
   static bool _nativePlayerActive = false;
+  static int _nativePlayerSequence = 0;
   const AppDevice({this.television = false, this.version = unknownVersion});
   final bool television;
   final String version;
@@ -155,6 +156,7 @@ class AppDevice {
     double speed = 1,
     Duration position = Duration.zero,
     Future<void> Function(Duration position, Duration duration)? onProgress,
+    void Function(NativePlaybackState state)? onState,
   }) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
       throw const NativePlaybackFailure('原生播放器仅支持 Android');
@@ -163,16 +165,19 @@ class AppDevice {
       throw const NativePlaybackFailure('已有原生播放器在运行');
     }
     _nativePlayerActive = true;
+    final sessionId = ++_nativePlayerSequence;
     const progressChannel = MethodChannel('duanju/native_progress');
     progressChannel.setMethodCallHandler((call) async {
       if (call.method != 'nativePlaybackProgress' || call.arguments is! Map) {
         return;
       }
       final data = call.arguments as Map;
-      await onProgress?.call(
-        Duration(milliseconds: (data['positionMs'] as num?)?.toInt() ?? 0),
-        Duration(milliseconds: (data['durationMs'] as num?)?.toInt() ?? 0),
-      );
+      if (data['sessionId'] != null && data['sessionId'] != sessionId) return;
+      final state = NativePlaybackState.fromMap(data);
+      if (data['sessionId'] == sessionId) onState?.call(state);
+      if (data['saveProgress'] != false) {
+        await onProgress?.call(state.position, state.duration);
+      }
     });
     final dynamic data;
     try {
@@ -187,6 +192,7 @@ class AppDevice {
         'qualities': qualities,
         'quality': quality,
         'serverTranscode': serverTranscode,
+        'sessionId': sessionId,
         'speed': speed,
         'positionMs': position.inMilliseconds,
       });
@@ -213,6 +219,43 @@ class AppDevice {
       completed: false,
     );
   }
+}
+
+class NativePlaybackState {
+  const NativePlaybackState({
+    required this.position,
+    required this.duration,
+    required this.buffer,
+    required this.playing,
+    required this.buffering,
+    required this.foreground,
+    required this.episodeIndex,
+  });
+
+  factory NativePlaybackState.fromMap(Map data) {
+    Duration time(String key) => Duration(
+      milliseconds: ((data[key] as num?)?.toInt() ?? 0)
+          .clamp(0, 1 << 53)
+          .toInt(),
+    );
+    return NativePlaybackState(
+      position: time('positionMs'),
+      duration: time('durationMs'),
+      buffer: time('bufferedPositionMs'),
+      playing: data['playing'] == true,
+      buffering: data['buffering'] == true,
+      foreground: data['foreground'] == true,
+      episodeIndex: (data['episodeIndex'] as num?)?.toInt() ?? -1,
+    );
+  }
+
+  final Duration position;
+  final Duration duration;
+  final Duration buffer;
+  final bool playing;
+  final bool buffering;
+  final bool foreground;
+  final int episodeIndex;
 }
 
 class NativePlaybackResult {

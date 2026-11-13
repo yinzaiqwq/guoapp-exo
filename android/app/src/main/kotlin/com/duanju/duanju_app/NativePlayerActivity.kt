@@ -59,6 +59,7 @@ class NativePlayerActivity : Activity() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_REFERER = "referer"
         const val EXTRA_POSITION_MS = "positionMs"
+        const val EXTRA_SESSION_ID = "sessionId"
 
         /** CENC 内容密钥，十六进制 AES-128；为空表示明文播放。 */
         const val EXTRA_KEY = "key"
@@ -81,7 +82,7 @@ class NativePlayerActivity : Activity() {
 
         const val RESULT_POSITION_MS = "positionMs"
         const val RESULT_DURATION_MS = "durationMs"
-        var progressListener: ((Long, Long) -> Unit)? = null
+        var progressListener: ((Map<String, Any>) -> Unit)? = null
         const val RESULT_COMPLETED = "completed"
 
         /** 用户在选集中切换了分集，回传目标下标。 */
@@ -151,6 +152,9 @@ class NativePlayerActivity : Activity() {
     private var qualityList: LinearLayout? = null
     private var hint: TextView? = null
     private var startPositionMs = 0L
+    private var sessionId = 0L
+    private var playbackForeground = false
+    private var resumePlayback = false
     private var finished = false
     private var episodeIndex = 0
     private var episodes: List<String> = emptyList()
@@ -357,14 +361,34 @@ class NativePlayerActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastProgressAt = 0L
+    private var lastSavedProgressAt = 0L
 
     private fun reportProgress(force: Boolean = false) {
         val exo = player ?: return
         val now = android.os.SystemClock.elapsedRealtime()
-        if (exo.duration <= 0 || exo.currentPosition < 100) return
-        if (!force && now - lastProgressAt < 5_000L) return
+        if (!force && now - lastProgressAt < 1_000L) return
         lastProgressAt = now
-        progressListener?.invoke(exo.currentPosition, exo.duration)
+        val saveProgress = force || now - lastSavedProgressAt >= 5_000L
+        if (saveProgress) lastSavedProgressAt = now
+        val position = exo.currentPosition.coerceAtLeast(0L)
+        val duration = exo.duration.coerceAtLeast(0L)
+        val buffer = exo.bufferedPosition.coerceAtLeast(position)
+        val buffering = exo.playbackState == Player.STATE_BUFFERING
+        progressListener?.invoke(mapOf(
+            "sessionId" to sessionId,
+            "episodeIndex" to episodeIndex,
+            "positionMs" to position,
+            "durationMs" to duration,
+            "bufferedPositionMs" to buffer,
+            "playing" to exo.isPlaying,
+            "buffering" to buffering,
+            "foreground" to playbackForeground,
+            "saveProgress" to saveProgress,
+        ))
+        if (saveProgress) android.util.Log.i(
+            "NativePlayback",
+            "session=$sessionId episode=${episodeIndex + 1} positionMs=$position durationMs=$duration bufferedMs=$buffer playing=${exo.isPlaying} buffering=$buffering foreground=$playbackForeground",
+        )
     }
 
     private val tick = object : Runnable {
@@ -393,6 +417,7 @@ class NativePlayerActivity : Activity() {
         }
         val referer = intent.getStringExtra(EXTRA_REFERER).orEmpty()
         startPositionMs = intent.getLongExtra(EXTRA_POSITION_MS, 0L)
+        sessionId = intent.getLongExtra(EXTRA_SESSION_ID, 0L)
         val key = decodeKey(intent.getStringExtra(EXTRA_KEY))
         val isHls = url.contains(".m3u8", ignoreCase = true)
         episodeIndex = intent.getIntExtra(EXTRA_EPISODE_INDEX, 0)
@@ -561,6 +586,17 @@ class NativePlayerActivity : Activity() {
         exo.playWhenReady = true
 
         exo.addListener(object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                android.util.Log.i(
+                    "NativePlayback",
+                    "session=$sessionId episode=${episodeIndex + 1} renderedFirstFrame width=${exo.videoSize.width} height=${exo.videoSize.height}",
+                )
+            }
+
+            override fun onEvents(player: Player, events: Player.Events) {
+                reportProgress(force = true)
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_ENDED) {
                     finished = true
@@ -1021,15 +1057,22 @@ class NativePlayerActivity : Activity() {
     }
 
     override fun onPause() {
+        resumePlayback = player?.playWhenReady == true && !finished
+        playbackForeground = false
+        player?.pause()
         reportProgress(force = true)
         super.onPause()
-        player?.pause()
         handler.removeCallbacks(tick)
     }
 
     override fun onResume() {
         super.onResume()
+        playbackForeground = true
+        if (resumePlayback) player?.play()
+        resumePlayback = false
+        handler.removeCallbacks(tick)
         handler.post(tick)
+        reportProgress(force = true)
     }
 
     override fun onDestroy() {
