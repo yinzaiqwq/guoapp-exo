@@ -476,8 +476,17 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
       final merged = <String, _AccountSeries>{
         if (!refresh)
           for (final item in state.items) item.drama.sourceId: item,
-        for (final item in incoming) item.drama.sourceId: item,
       };
+      for (final item in incoming) {
+        final previous = merged[item.drama.sourceId];
+        if (kind == _AccountListKind.history &&
+            previous?.watchedAt != null &&
+            (item.watchedAt == null ||
+                previous!.watchedAt! >= item.watchedAt!)) {
+          continue;
+        }
+        merged[item.drama.sourceId] = item;
+      }
       setState(() {
         state.items = merged.values.toList();
         state.loaded = true;
@@ -907,6 +916,7 @@ class _AccountSeries {
     required this.note,
     this.episodeIndex,
     this.positionSeconds,
+    this.watchedAt,
   });
 
   final Drama drama;
@@ -914,6 +924,7 @@ class _AccountSeries {
   final String note;
   final int? episodeIndex;
   final double? positionSeconds;
+  final int? watchedAt;
 
   String get historyLabel {
     final parts = <String>[];
@@ -943,7 +954,15 @@ class _AccountSeries {
     final history = value['history'];
     final episodeIndex = history is Map ? history['episodeIndex'] : null;
     final positionSeconds = history is Map ? history['positionSeconds'] : null;
+    final watchedAt = history is Map ? history['watchedAt'] : null;
     return _AccountSeries(
+      watchedAt:
+          watchedAt is num &&
+              watchedAt.isFinite &&
+              watchedAt > 0 &&
+              watchedAt <= 4102444800000
+          ? watchedAt.toInt()
+          : null,
       episodeIndex:
           episodeIndex is num && episodeIndex >= 0 && episodeIndex <= 10000
           ? episodeIndex.toInt()

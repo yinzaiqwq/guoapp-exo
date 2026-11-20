@@ -346,6 +346,107 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+  testWidgets(
+    'older duplicate history pages do not replace newer watch progress',
+    (tester) async {
+      final repository = AccountLibraryRepository()
+        ..morePages.add('history:0')
+        ..pageItems['history:20'] = [
+          AccountLibraryRepository.row(
+            '301',
+            '合成账号历史',
+            history: {
+              'episodeIndex': 8,
+              'positionSeconds': 120,
+              'watchedAt': 1795190340000,
+            },
+          ),
+        ];
+      final store = await createStore();
+      await openAccount(tester, repository, store);
+      await selectLibrary(tester, 'history');
+      expect(find.text('手机观看到第 3 集 · 0:37'), findsOneWidget);
+      await press(tester, '加载更多观看历史');
+      expect(
+        repository.accountRequests.where((value) => value == 'history:20'),
+        hasLength(1),
+      );
+      expect(find.text('合成账号历史'), findsOneWidget);
+      expect(find.text('手机观看到第 3 集 · 0:37'), findsOneWidget);
+      expect(find.text('手机观看到第 9 集 · 2:00'), findsNothing);
+      expect(store.history, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'undated duplicate history does not replace timestamped watch progress',
+    (tester) async {
+      final repository = AccountLibraryRepository()
+        ..morePages.add('history:0')
+        ..pageItems['history:20'] = [
+          AccountLibraryRepository.row(
+            '301',
+            '合成账号历史',
+            history: {'episodeIndex': 8, 'positionSeconds': 120},
+          ),
+        ];
+      final store = await createStore();
+      await openAccount(tester, repository, store);
+      await selectLibrary(tester, 'history');
+      expect(find.text('手机观看到第 3 集 · 0:37'), findsOneWidget);
+      await press(tester, '加载更多观看历史');
+      expect(
+        repository.accountRequests.where((value) => value == 'history:20'),
+        hasLength(1),
+      );
+      expect(find.text('合成账号历史'), findsOneWidget);
+      expect(find.text('手机观看到第 3 集 · 0:37'), findsOneWidget);
+      expect(find.text('手机观看到第 9 集 · 2:00'), findsNothing);
+      expect(store.history, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'duplicate history without timestamps remains compatible with later pages',
+    (tester) async {
+      final repository = AccountLibraryRepository()
+        ..morePages.add('history:0')
+        ..pageItems['history:0'] = [
+          AccountLibraryRepository.row(
+            '301',
+            '合成账号历史',
+            history: {'episodeIndex': 0, 'positionSeconds': 11},
+          ),
+        ]
+        ..pageItems['history:20'] = [
+          AccountLibraryRepository.row(
+            '301',
+            '合成账号历史',
+            history: {'episodeIndex': 4, 'positionSeconds': 78},
+          ),
+        ];
+      final store = await createStore();
+      await openAccount(tester, repository, store);
+      await selectLibrary(tester, 'history');
+      expect(find.text('手机观看到第 1 集 · 0:11'), findsOneWidget);
+      await press(tester, '加载更多观看历史');
+      expect(
+        repository.accountRequests.where((value) => value == 'history:20'),
+        hasLength(1),
+      );
+      expect(find.text('合成账号历史'), findsOneWidget);
+      expect(find.text('手机观看到第 5 集 · 1:18'), findsOneWidget);
+      expect(find.text('手机观看到第 1 集 · 0:11'), findsNothing);
+      expect(store.history, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('television layout exposes every library without overflow', (
     tester,
   ) async {
