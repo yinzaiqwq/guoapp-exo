@@ -122,9 +122,10 @@ jobs:
           "$apksigner" --version || true
           for apk in dist/android/*.apk; do
             echo "== $(basename "$apk")"
-            output=$("$apksigner" verify --print-certs "$apk" 2>&1 || true)
+            output=$("$apksigner" verify --print-certs "$apk" 2>&1)
             printf '%s\n' "$output"
-            if ! printf '%s' "$output" | tr -d ':' | tr '[:upper:]' '[:lower:]' | grep -q "$expected"; then
+            normalized=$(printf '%s\n' "$output" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+            if ! grep -Fq "$expected" <<< "$normalized"; then
               echo "签名证书与发布证书不一致，已终止。" >&2
               exit 1
             fi
