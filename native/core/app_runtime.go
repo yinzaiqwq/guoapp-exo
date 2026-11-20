@@ -97,6 +97,9 @@ type nativeDrama struct {
 }
 
 type nativeInput struct {
+	ProfileID        string                  `json:"profileId"`
+	AccountKey       string                  `json:"accountKey"`
+	Offset           int                     `json:"offset"`
 	LAN              json.RawMessage         `json:"lan"`
 	ExpectedVersions map[string]string       `json:"expectedVersions"`
 	SystemProxy      nativeSystemProxy       `json:"systemProxy"`
@@ -153,35 +156,38 @@ type nativePlan struct {
 }
 
 type nativeEngine struct {
-	lanMu            sync.Mutex
-	lan              *nativeLANServer
-	settingsMu       sync.Mutex
-	settings         nativeResourceSettings
-	readMu           sync.Mutex
-	reads            map[string]nativeReadRequest
-	readCount        int
-	work             map[string]bool
-	downloads        *nativeDownloads
-	downloader       *Downloader
-	directory        string
-	mu               sync.Mutex
-	catalogs         map[string][]nativeDrama
-	catalogStates    map[string]nativeCatalogState
-	categoryOptions  map[string][]nativeCategory
-	hongguoCatalog   *hongguoCatalogState
-	recommendations  map[string]nativeRecommendationState
-	catalogSaveError error
-	sourceSaveError  error
-	covers           *nativeCoverCache
-	stream           *nativeStreamServer
-	playbacks        map[string]nativePlaybackChoice
-	playbackMu       sync.Mutex
-	playbackSequence int64
-	playbackCancel   context.CancelFunc
-	sourceTasks      map[string]*nativeSourceTask
-	sourceRecords    map[string]nativeSourceRecord
-	sourceCatalogMu  sync.Mutex
-	sourceCatalogs   map[string]chan struct{}
+	accountMu         sync.Mutex
+	accounts          map[string]*hongguoAccountState
+	accountStorageKey []byte
+	lanMu             sync.Mutex
+	lan               *nativeLANServer
+	settingsMu        sync.Mutex
+	settings          nativeResourceSettings
+	readMu            sync.Mutex
+	reads             map[string]nativeReadRequest
+	readCount         int
+	work              map[string]bool
+	downloads         *nativeDownloads
+	downloader        *Downloader
+	directory         string
+	mu                sync.Mutex
+	catalogs          map[string][]nativeDrama
+	catalogStates     map[string]nativeCatalogState
+	categoryOptions   map[string][]nativeCategory
+	hongguoCatalog    *hongguoCatalogState
+	recommendations   map[string]nativeRecommendationState
+	catalogSaveError  error
+	sourceSaveError   error
+	covers            *nativeCoverCache
+	stream            *nativeStreamServer
+	playbacks         map[string]nativePlaybackChoice
+	playbackMu        sync.Mutex
+	playbackSequence  int64
+	playbackCancel    context.CancelFunc
+	sourceTasks       map[string]*nativeSourceTask
+	sourceRecords     map[string]nativeSourceRecord
+	sourceCatalogMu   sync.Mutex
+	sourceCatalogs    map[string]chan struct{}
 }
 
 var nativeState struct {
@@ -308,6 +314,9 @@ func NativeRequest(raw string) (result string) {
 	envelope := map[string]any{"ok": err == nil}
 	if err != nil {
 		envelope["error"] = publicError(err).Error()
+		if errors.Is(err, errHongguoAccountSessionExpired) {
+			envelope["code"] = "hongguo_session_expired"
+		}
 		if errors.Is(err, errNativeLocalFile) {
 			envelope["code"] = "local_media"
 		}
@@ -387,6 +396,8 @@ func nativeDispatch(input nativeInput) (any, error) {
 		ctx = work
 	}
 	switch input.Action {
+	case "hongguoAccount":
+		return engine.nativeHongguoAccount(ctx, input)
 	case "lan":
 		return engine.nativeLAN(ctx, input.Command, input.LAN)
 	case "updateSystemProxy":

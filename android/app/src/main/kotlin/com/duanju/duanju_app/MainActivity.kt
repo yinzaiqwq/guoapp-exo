@@ -173,6 +173,17 @@ class MainActivity : FlutterActivity() {
             .also { channel ->
                 channel.setMethodCallHandler { call, result ->
                     when (call.method) {
+                        "hongguoAccountKey" -> {
+                            Thread {
+                                val outcome = runCatching { HongguoAccountVault.storageKey(applicationContext) }
+                                runOnUiThread {
+                                    outcome.fold(
+                                        onSuccess = { result.success(it) },
+                                        onFailure = { result.error("account_protection", "本机账号保护未能打开", null) }
+                                    )
+                                }
+                            }.start()
+                        }
                         "deviceInfo" -> {
                             val version = packageManager.getPackageInfo(packageName, 0).versionName
                             result.success(mapOf("television" to isTelevisionDevice(), "version" to version))

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
@@ -68,6 +69,14 @@ class AppFailure implements Exception {
 }
 
 abstract class AppRepository {
+  bool get supportsHongguoAccount => false;
+  Future<Map<String, dynamic>> hongguoAccount(
+    String command, {
+    String sessionId = '',
+    int offset = 0,
+    String? profileId,
+  }) async => throw AppFailure('当前版本尚未包含红果账号功能');
+
   Future<Map<String, dynamic>> lan(
     String command,
     Map<String, dynamic> payload,
@@ -211,6 +220,61 @@ class NativeRepository extends AppRepository {
   final _readOwner = DateTime.now().microsecondsSinceEpoch.toString();
   int _readSequence = 0;
   final _activeReads = <String, int>{};
+  bool _hongguoStorageReady = false;
+
+  @override
+  bool get supportsHongguoAccount => true;
+
+  Future<void> _prepareHongguoAccountStorage() async {
+    if (!Platform.isAndroid || _hongguoStorageReady) return;
+    try {
+      final key = await const MethodChannel('duanju/device')
+          .invokeMethod<String>('hongguoAccountKey');
+      if (key == null || key.isEmpty) throw AppFailure('本机账号保护尚未就绪');
+      await _call({
+        'action': 'hongguoAccount',
+        'command': 'prepare',
+        'accountKey': key,
+      });
+      _hongguoStorageReady = true;
+    } on AppFailure {
+      rethrow;
+    } catch (_) {
+      throw AppFailure('本机账号保护未能打开，请重新打开应用后重试');
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> hongguoAccount(
+    String command, {
+    String sessionId = '',
+    int offset = 0,
+    String? profileId,
+  }) async {
+    if (!{'status', 'start', 'poll', 'commit', 'cancel', 'logout', 'likes'}
+        .contains(command)) {
+      throw AppFailure('账号操作无效');
+    }
+    final epoch = access?.profileEpoch;
+    final owner = access?.profile.id ?? 'default';
+    if (command != 'cancel') {
+      if (profileId != null && profileId != owner) {
+        throw AppFailure('用户已切换，请重新操作');
+      }
+      await _prepareHongguoAccountStorage();
+      if (epoch != access?.profileEpoch) {
+        throw AppFailure('用户已切换，请重新操作');
+      }
+    }
+    return _call({
+      'action': 'hongguoAccount',
+      'command': command,
+      'profileId': command == 'cancel' ? profileId ?? owner : owner,
+      'session': sessionId,
+      'offset': offset,
+    });
+  }
+
 
   @override
   Future<Map<String, dynamic>> lan(
@@ -573,6 +637,7 @@ class NativeRepository extends AppRepository {
             'cancelRead',
             'updateSystemProxy',
           }.contains(action) ||
+          action == 'hongguoAccount' && input['command'] == 'cancel' ||
           action == 'workLease' && input['command'] == 'end' ||
           action == 'lan' &&
               {
@@ -655,6 +720,17 @@ class NativeRepository extends AppRepository {
       }
       final data = response['data'];
       if (!unrestricted && epoch != access?.profileEpoch) {
+        if (action == 'hongguoAccount' &&
+            input['command'] == 'start' &&
+            data is Map &&
+            data['sessionId'] is String) {
+          await _call({
+            'action': 'hongguoAccount',
+            'command': 'cancel',
+            'profileId': input['profileId'],
+            'session': data['sessionId'],
+          }).catchError((Object _) => <String, dynamic>{});
+        }
         if (data is Map && data['session'] is String) {
           await release(data['session'] as String);
         }
@@ -687,7 +763,11 @@ class NativeRepository extends AppRepository {
           }).catchError((Object _) => <String, dynamic>{}),
         );
       }
-      throw AppFailure('站源响应超时，请重试');
+      throw AppFailure(
+        input['action'] == 'hongguoAccount'
+            ? '红果账号连接超时，请重试'
+            : '站源响应超时，请重试',
+      );
     } catch (_) {
       throw AppFailure('本地核心加载失败，请使用完整安装包重新安装');
     }

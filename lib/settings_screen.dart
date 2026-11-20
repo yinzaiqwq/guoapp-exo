@@ -21,6 +21,7 @@ import 'widgets.dart';
 import 'resource_settings_screen.dart';
 import 'lan_screen.dart';
 import 'diary_service.dart';
+import 'hongguo_account_screen.dart';
 
 String storageSize(int bytes) {
   if (bytes < 0) return '暂不可用';
@@ -289,6 +290,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => openLanSync(context),
               ),
+              if (widget.repository.supportsHongguoAccount)
+                ListTile(
+                  key: const ValueKey('hongguo-account'),
+                  leading: const Icon(Icons.favorite_border_rounded),
+                  title: const Text('红果账号与点赞'),
+                  subtitle: const Text('扫码登录，读取自己点赞的剧集'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  enabled: !widget.store.locked,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => HongguoAccountScreen(
+                        repository: widget.repository,
+                        store: widget.store,
+                      ),
+                    ),
+                  ),
+                ),
               if (Platform.isWindows)
                 ListTile(
                   key: const ValueKey('check-update'),
