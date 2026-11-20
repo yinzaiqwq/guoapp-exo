@@ -7,7 +7,7 @@ import (
 	"errors"
 )
 
-func hongguoAccountCipher(key []byte) (cipher.AEAD, error) {
+func newHongguoAccountAEAD(key []byte) (cipher.AEAD, error) {
 	if len(key) != 32 {
 		return nil, errors.New("账号保护未就绪")
 	}
@@ -18,7 +18,7 @@ func hongguoAccountCipher(key []byte) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 func protectHongguoAccount(profile string, data, key []byte) ([]byte, error) {
-	codec, err := hongguoAccountCipher(key)
+	codec, err := newHongguoAccountAEAD(key)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +29,7 @@ func protectHongguoAccount(profile string, data, key []byte) ([]byte, error) {
 	return codec.Seal(nonce, nonce, data, []byte("guoapp/hongguo/v1/"+profile)), nil
 }
 func unprotectHongguoAccount(profile string, data, key []byte) ([]byte, error) {
-	codec, err := hongguoAccountCipher(key)
+	codec, err := newHongguoAccountAEAD(key)
 	if err != nil {
 		return nil, err
 	}
