@@ -100,6 +100,15 @@ func prepareHongguoAccountLikes(ctx context.Context, credentials *hongguoAccount
 	if offset < 0 || offset > 2000 {
 		return nil, errors.New("点赞片单分页参数无效")
 	}
+	return prepareHongguoAccountGet(ctx, credentials, device, hongguoAccountLikesURL, url.Values{
+		"object_type_list": {"6,15,10"}, "action_type": {"3"}, "offset": {strconv.Itoa(offset)}, "count": {"100"},
+	})
+}
+
+func prepareHongguoAccountGet(ctx context.Context, credentials *hongguoAccountCredentials, device *hongguoAccountDevice, endpoint string, extra url.Values) (*http.Request, error) {
+	if endpoint != hongguoAccountLikesURL && endpoint != hongguoAccountFavoritesURL && endpoint != hongguoAccountHistoryURL {
+		return nil, errors.New("账号片单读取地址无效")
+	}
 	if credentials == nil || !hongguoAccountDeviceIDPattern.MatchString(credentials.UID) || len(credentials.Cookies) > 80 {
 		return nil, errors.New("请先登录红果账号")
 	}
@@ -117,10 +126,9 @@ func prepareHongguoAccountLikes(ctx context.Context, credentials *hongguoAccount
 			query.Set(key, value)
 		}
 	}
-	query.Set("object_type_list", "6,15,10")
-	query.Set("action_type", "3")
-	query.Set("offset", strconv.Itoa(offset))
-	query.Set("count", "100")
+	for key, values := range extra {
+		query[key] = append([]string(nil), values...)
+	}
 	now := time.Now()
 	if now.Unix() < 946684800 || now.Unix() > 4102444800 {
 		return nil, errors.New("系统时间异常，请校准时间后重试")
@@ -148,7 +156,7 @@ func prepareHongguoAccountLikes(ctx context.Context, credentials *hongguoAccount
 	if signature == "" {
 		return nil, errors.New("红果账号请求准备失败，请稍后重试")
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, hongguoAccountLikesURL+"?"+raw, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+raw, nil)
 	if err != nil {
 		return nil, errors.New("点赞片单请求格式异常")
 	}
@@ -230,6 +238,14 @@ func fetchHongguoAccountLikes(ctx context.Context, credentials *hongguoAccountCr
 	if err != nil {
 		return nil, err
 	}
+	root, err := fetchHongguoAccountGet(request, "点赞片单")
+	if err != nil {
+		return nil, err
+	}
+	return parseHongguoAccountLikes(root, offset)
+}
+
+func fetchHongguoAccountGet(request *http.Request, label string) (map[string]any, error) {
 	transport := &http.Transport{
 		DialContext:           (&net.Dialer{Timeout: 8 * time.Second}).DialContext,
 		TLSHandshakeTimeout:   8 * time.Second,
@@ -240,38 +256,38 @@ func fetchHongguoAccountLikes(ctx context.Context, credentials *hongguoAccountCr
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, errors.New("点赞片单连接失败，请稍后重试；原列表和登录已保留")
+		return nil, errors.New(label + "连接失败，请稍后重试；原列表和登录已保留")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, errors.New("点赞片单服务暂不可用，请稍后重试；原列表和登录已保留")
+		return nil, errors.New(label + "服务暂不可用，请稍后重试；原列表和登录已保留")
 	}
 	var reader io.Reader = response.Body
 	if strings.EqualFold(response.Header.Get("Content-Encoding"), "gzip") {
 		gzipReader, err := gzip.NewReader(response.Body)
 		if err != nil {
-			return nil, errors.New("点赞片单响应格式异常，原列表和登录已保留")
+			return nil, errors.New(label + "响应格式异常，原列表和登录已保留")
 		}
 		defer gzipReader.Close()
 		reader = gzipReader
 	} else if encoding := response.Header.Get("Content-Encoding"); encoding != "" && !strings.EqualFold(encoding, "identity") {
-		return nil, errors.New("点赞片单响应格式异常，原列表和登录已保留")
+		return nil, errors.New(label + "响应格式异常，原列表和登录已保留")
 	}
 	payload, err := io.ReadAll(io.LimitReader(reader, hongguoAccountMaxResponse+1))
 	if err != nil || len(payload) == 0 || len(payload) > hongguoAccountMaxResponse {
-		return nil, errors.New("点赞片单响应未完整接收，原列表和登录已保留")
+		return nil, errors.New(label + "响应未完整接收，原列表和登录已保留")
 	}
 	var root map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	if decoder.Decode(&root) != nil || root == nil {
-		return nil, errors.New("点赞片单响应格式异常，原列表和登录已保留")
+		return nil, errors.New(label + "响应格式异常，原列表和登录已保留")
 	}
 	var extra any
 	if decoder.Decode(&extra) != io.EOF {
-		return nil, errors.New("点赞片单响应格式异常，原列表和登录已保留")
+		return nil, errors.New(label + "响应格式异常，原列表和登录已保留")
 	}
-	return parseHongguoAccountLikes(root, offset)
+	return root, nil
 }
 
 func hongguoAccountInteger(value any) (int64, bool) {

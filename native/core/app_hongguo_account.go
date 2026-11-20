@@ -264,17 +264,17 @@ func (engine *nativeEngine) nativeHongguoAccount(ctx context.Context, input nati
 			return nil, err
 		}
 		return engine.accountStatus(state), nil
-	case "likes":
+	case "likes", "favorites", "history":
 		if state.disk.Credentials == nil || state.expired {
 			return nil, errHongguoAccountSessionExpired
 		}
 		if input.Offset < 0 || input.Offset > 2000 {
-			return nil, errors.New("点赞列表页码无效")
+			return nil, errors.New("账号片单页码无效")
 		}
 		if state.disk.Device == nil {
 			now := time.Now().Unix()
 			if state.disk.AttemptAt != 0 && now-state.disk.AttemptAt < 60 {
-				return nil, errors.New("账号连接刚尝试过，请稍候一分钟再刷新点赞")
+				return nil, errors.New("账号连接刚尝试过，请稍候一分钟再刷新片单")
 			}
 			next := state.disk
 			next.AttemptAt = now
@@ -296,7 +296,12 @@ func (engine *nativeEngine) nativeHongguoAccount(ctx context.Context, input nati
 			}
 			state.devicePending = false
 		}
-		result, err := fetchHongguoAccountLikes(ctx, state.disk.Credentials, state.disk.Device, input.Offset)
+		var result map[string]any
+		if input.Command == "likes" {
+			result, err = fetchHongguoAccountLikes(ctx, state.disk.Credentials, state.disk.Device, input.Offset)
+		} else {
+			result, err = fetchHongguoAccountLibrary(ctx, state.disk.Credentials, state.disk.Device, input.Command, input.Offset, engine.downloader.hongguoAccountLibraryMetadata)
+		}
 		if errors.Is(err, errHongguoAccountSessionExpired) {
 			state.expired = true
 		}

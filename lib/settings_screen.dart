@@ -294,8 +294,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ListTile(
                   key: const ValueKey('hongguo-account'),
                   leading: const Icon(Icons.favorite_border_rounded),
-                  title: const Text('红果账号与点赞'),
-                  subtitle: const Text('扫码登录，读取自己点赞的剧集'),
+                  title: const Text('红果账号'),
+                  subtitle: const Text('扫码读取点赞、收藏和观看历史'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   enabled: !widget.store.locked,
                   onTap: () => Navigator.push(

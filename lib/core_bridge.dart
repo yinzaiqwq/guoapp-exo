@@ -251,8 +251,17 @@ class NativeRepository extends AppRepository {
     int offset = 0,
     String? profileId,
   }) async {
-    if (!{'status', 'start', 'poll', 'commit', 'cancel', 'logout', 'likes'}
-        .contains(command)) {
+    if (!{
+      'status',
+      'start',
+      'poll',
+      'commit',
+      'cancel',
+      'logout',
+      'likes',
+      'favorites',
+      'history',
+    }.contains(command)) {
       throw AppFailure('账号操作无效');
     }
     final epoch = access?.profileEpoch;

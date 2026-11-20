@@ -35,28 +35,51 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
   bool _foreground = true;
   bool _busy = false;
   bool _polling = false;
-  bool _loadingLikes = false;
   bool _statusLoaded = false;
   bool _storageError = false;
   bool _authenticated = false;
   bool _persistent = false;
   bool _identityVerified = false;
   bool _sessionExpired = false;
-  bool _likesLoaded = false;
-  bool _hasMore = false;
-  bool _retryLikesRefresh = true;
-  int _nextOffset = 0;
-  int _unsupportedCount = 0;
   String _displayName = '';
   String _sessionId = '';
   String _qrText = '';
   String _phase = 'idle';
   String? _accountError;
-  String? _likesError;
   String _qrMessage = '';
   DateTime? _expiresAt;
-  DateTime? _syncedAt;
-  List<_LikedSeries> _items = const [];
+
+  _AccountListKind _listKind = _AccountListKind.likes;
+  final _lists = {
+    for (final kind in _AccountListKind.values) kind: _AccountListState(),
+  };
+  final _scrollController = ScrollController();
+
+  _AccountListState get _list => _lists[_listKind]!;
+  bool get _loadingList => _list.loading;
+  bool get _listLoaded => _list.loaded;
+  bool get _hasMore => _list.hasMore;
+  bool get _retryListRefresh => _list.retryRefresh;
+  int get _unsupportedCount => _list.unsupportedCount;
+  int? get _total => _list.total;
+  String? get _listError => _list.error;
+  DateTime? get _syncedAt => _list.syncedAt;
+  List<_AccountSeries> get _items => _list.items;
+  bool get _anyListLoading => _lists.values.any((state) => state.loading);
+
+  void _clearLists() {
+    for (final state in _lists.values) {
+      state.reset();
+    }
+  }
+
+  void _selectList(_AccountListKind kind) {
+    if (!_active || _busy || kind == _listKind) return;
+    setState(() => _listKind = kind);
+    if (!_list.loaded && !_list.loading) {
+      unawaited(_loadList(refresh: true));
+    }
+  }
 
   bool get _active =>
       mounted &&
@@ -70,8 +93,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
     return remaining < 0 ? 0 : remaining;
   }
 
-  bool get _qrEnded =>
-      const {'expired', 'cancelled', 'error'}.contains(_phase);
+  bool get _qrEnded => const {'expired', 'cancelled', 'error'}.contains(_phase);
 
   @override
   void initState() {
@@ -113,6 +135,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
     _pollTimer?.cancel();
     _countdownTimer?.cancel();
     widget.store.removeListener(_storeChanged);
+    _scrollController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _cancelRemote(_sessionId);
     super.dispose();
@@ -131,7 +154,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
     setState(() {
       _invalidated = true;
       _authenticated = false;
-      _items = const [];
+      _clearLists();
       _qrText = '';
       _sessionId = '';
       _displayName = '';
@@ -175,7 +198,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
       if (_current(generation)) setState(() => _busy = false);
     }
     if (_current(generation) && _authenticated) {
-      await _loadLikes(refresh: true);
+      await _loadList(refresh: true);
     }
   }
 
@@ -190,7 +213,11 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
   }
 
   Future<void> _start() async {
-    if (!_active || _busy || _authenticated || _storageError || _sessionExpired) {
+    if (!_active ||
+        _busy ||
+        _authenticated ||
+        _storageError ||
+        _sessionExpired) {
       return;
     }
     final previous = _sessionId;
@@ -357,12 +384,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
         _phase = 'idle';
         _identityVerified = false;
         _sessionExpired = false;
-        _items = const [];
-        _likesLoaded = false;
-        _likesError = null;
-        _syncedAt = null;
-        _hasMore = false;
-        _unsupportedCount = 0;
+        _clearLists();
       });
       loggedIn = true;
     } catch (error) {
@@ -372,7 +394,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
     } finally {
       if (_current(generation)) setState(() => _busy = false);
     }
-    if (loggedIn && _current(generation)) await _loadLikes(refresh: true);
+    if (loggedIn && _current(generation)) await _loadList(refresh: true);
   }
 
   void _cancel() {
@@ -393,7 +415,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
   }
 
   Future<void> _logout() async {
-    if (!_active || _busy || _loadingLikes) return;
+    if (!_active || _busy || _anyListLoading) return;
     final generation = ++_generation;
     setState(() {
       _busy = true;
@@ -407,13 +429,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
         _storageError = false;
         _displayName = '';
         _sessionExpired = false;
-        _likesLoaded = false;
-        _items = const [];
-        _likesError = null;
-        _syncedAt = null;
-        _hasMore = false;
-        _nextOffset = 0;
-        _unsupportedCount = 0;
+        _clearLists();
       });
     } catch (error) {
       if (_current(generation)) {
@@ -424,25 +440,27 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
     }
   }
 
-  Future<void> _loadLikes({required bool refresh}) async {
+  Future<void> _loadList({required bool refresh}) async {
+    final kind = _listKind;
+    final state = _lists[kind]!;
     if (!_active ||
         !_authenticated ||
         _busy ||
-        _loadingLikes ||
+        state.loading ||
         _sessionExpired ||
-        (!refresh && !_hasMore)) {
+        (!refresh && !state.hasMore)) {
       return;
     }
     final generation = _generation;
-    final offset = refresh ? 0 : _nextOffset;
+    final offset = refresh ? 0 : state.nextOffset;
     setState(() {
-      _loadingLikes = true;
-      _likesError = null;
-      _retryLikesRefresh = refresh;
+      state.loading = true;
+      state.error = null;
+      state.retryRefresh = refresh;
     });
     try {
       final result = await widget.repository.hongguoAccount(
-        'likes',
+        kind.command,
         offset: offset,
       );
       if (!_current(generation)) return;
@@ -452,37 +470,45 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
       if (rows is! List ||
           intValue(result['offset']) != offset ||
           (more && (next <= offset || next > 2000))) {
-        throw const FormatException('点赞列表分页异常');
+        throw const FormatException('账号片单分页异常');
       }
-      final incoming = rows.map(_LikedSeries.fromJson).toList();
-      final merged = <String, _LikedSeries>{
-        if (!refresh) for (final item in _items) item.drama.sourceId: item,
+      final incoming = rows.map(_AccountSeries.fromJson).toList();
+      final merged = <String, _AccountSeries>{
+        if (!refresh)
+          for (final item in state.items) item.drama.sourceId: item,
         for (final item in incoming) item.drama.sourceId: item,
       };
       setState(() {
-        _items = merged.values.toList();
-        _likesLoaded = true;
-        _hasMore = more;
-        _nextOffset = next;
-        _unsupportedCount =
-            (refresh ? 0 : _unsupportedCount) +
+        state.items = merged.values.toList();
+        state.loaded = true;
+        state.hasMore = more;
+        state.nextOffset = next;
+        final total = result['total'];
+        if (total is num && total.isFinite && total >= 0) {
+          state.total = total.toInt();
+        } else if (refresh) {
+          state.total = null;
+        }
+        state.unsupportedCount =
+            (refresh ? 0 : state.unsupportedCount) +
             intValue(result['unsupportedCount']);
-        _syncedAt = DateTime.now();
+        state.syncedAt = DateTime.now();
       });
     } catch (error) {
       if (_current(generation)) {
         setState(() {
-          _sessionExpired =
-              error is AppFailure && error.code == 'hongguo_session_expired';
-          _likesError = _errorText(error, '读取点赞片单失败，已有列表已保留，请重试');
+          if (error is AppFailure && error.code == 'hongguo_session_expired') {
+            _sessionExpired = true;
+          }
+          state.error = _errorText(error, '读取${kind.label}失败，已有列表已保留，请重试');
         });
       }
     } finally {
-      if (_current(generation)) setState(() => _loadingLikes = false);
+      if (_current(generation)) setState(() => state.loading = false);
     }
   }
 
-  void _open(_LikedSeries item) {
+  void _open(_AccountSeries item) {
     if (!_active ||
         !item.playable ||
         !widget.store.allowsSource(SourceSite.hongguotv.id)) {
@@ -543,7 +569,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
             Text(
               _authenticated
                   ? '账号仅关联当前本地用户“${widget.store.profile.name}”。'
-                  : '使用手机红果 App 扫码并确认，即可读取自己点赞的剧集。',
+                  : '使用手机红果 App 扫码并确认，读取账号点赞、收藏和观看历史。',
             ),
             if (_authenticated && !_persistent)
               _message('当前设备仅在本次运行中保留登录，关闭应用后需要重新扫码。'),
@@ -563,7 +589,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
               )
             else if (_storageError || _authenticated || _sessionExpired)
               OutlinedButton.icon(
-                onPressed: _busy || _loadingLikes ? null : _logout,
+                onPressed: _busy || _anyListLoading ? null : _logout,
                 icon: const Icon(Icons.logout_rounded),
                 label: Text(
                   _storageError
@@ -624,10 +650,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
         runSpacing: 8,
         children: [
           if (_identityVerified && !_busy)
-            FilledButton(
-              onPressed: _commit,
-              child: const Text('重试完成登录'),
-            )
+            FilledButton(onPressed: _commit, child: const Text('重试完成登录'))
           else if (_qrEnded)
             FilledButton(
               onPressed: _busy ? null : _start,
@@ -655,7 +678,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
     ],
   );
 
-  Widget _likesHeader() => Padding(
+  Widget _listHeader() => Padding(
     padding: const EdgeInsets.fromLTRB(4, 20, 4, 12),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -666,55 +689,59 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(
-              '我的点赞 · ${_items.length} 部',
+              '${_listKind.title} · ${_items.length} 部'
+              '${_total == null ? '' : ' / 共 $_total 条'}',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             OutlinedButton.icon(
-              onPressed: _busy || _loadingLikes || _sessionExpired
+              onPressed: _busy || _loadingList || _sessionExpired
                   ? null
-                  : () => _loadLikes(refresh: true),
+                  : () => _loadList(refresh: true),
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('刷新片单'),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        const Text('片单来自红果账号；点击剧集后，通过已配置的红果TV服务播放。'),
+        const Text('来自手机红果账号，与电视本地追剧、最近观看分开保存，不覆盖本地数据。'),
+        if (_listKind == _AccountListKind.history)
+          _message('这里只读取账号历史，不向手机回写电视进度；点击剧集进入详情，播放沿用电视本地进度。')
+        else
+          _message('点击剧集后，通过已配置的红果TV服务播放。'),
         if (_syncedAt != null)
           _message(
             '本次更新 ${_syncedAt!.hour.toString().padLeft(2, '0')}:'
             '${_syncedAt!.minute.toString().padLeft(2, '0')}',
           ),
         if (_unsupportedCount > 0)
-          _message('已略过 $_unsupportedCount 条非剧集或暂不支持的点赞内容。'),
+          _message('已略过 $_unsupportedCount 条非剧集或暂不支持的${_listKind.label}内容。'),
         if (!widget.store.allowsSource(SourceSite.hongguotv.id))
           _message('当前本地用户未开启红果TV权限，片单可查看，播放入口暂不可用。'),
-        if (_likesError != null) ...[
-          _message(_likesError!, error: true),
+        if (_listError != null) ...[
+          _message(_listError!, error: true),
           if (!_sessionExpired)
             TextButton.icon(
-              onPressed: _loadingLikes
+              onPressed: _loadingList
                   ? null
-                  : () => _loadLikes(refresh: _retryLikesRefresh),
+                  : () => _loadList(refresh: _retryListRefresh),
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('重试读取'),
             ),
         ],
-        if (_loadingLikes) const LinearProgressIndicator(),
-        if (_likesLoaded && _items.isEmpty && !_loadingLikes)
+        if (_loadingList) const LinearProgressIndicator(),
+        if (_listLoaded && _items.isEmpty && !_loadingList)
           _message(
             _unsupportedCount > 0
-                ? '当前已读取的点赞中没有可展示的剧集。'
-                : '当前已读取的点赞片单为空。可先在红果 App 点赞剧集，再刷新。',
+                ? '当前已读取的${_listKind.label}中没有可展示的剧集。'
+                : '当前已读取的${_listKind.label}为空，可在红果 App 更新后刷新。',
           ),
       ],
     ),
   );
 
-  Widget _likedTile(_LikedSeries item) {
+  Widget _seriesTile(_AccountSeries item) {
     final enabled =
-        item.playable &&
-        widget.store.allowsSource(SourceSite.hongguotv.id);
+        item.playable && widget.store.allowsSource(SourceSite.hongguotv.id);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
@@ -754,6 +781,14 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
+                    if (_listKind == _AccountListKind.history &&
+                        item.historyLabel.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        item.historyLabel,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Text(
                       item.playable
@@ -780,7 +815,7 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('红果账号与点赞')),
+    appBar: AppBar(title: const Text('红果账号')),
     body: _invalidated || widget.store.locked
         ? Center(
             child: Padding(
@@ -804,34 +839,57 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 880),
               child: ListView.builder(
+                controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                itemCount: _authenticated ? _items.length + 3 : 1,
+                itemCount: _authenticated ? _items.length + 4 : 1,
                 itemBuilder: (context, index) {
                   if (index == 0) return _accountCard();
-                  if (index == 1) return _likesHeader();
-                  final itemIndex = index - 2;
+                  if (index == 1) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: [
+                          for (final kind in _AccountListKind.values)
+                            ChoiceChip(
+                              key: ValueKey('hongguo-account-${kind.command}'),
+                              label: Text(kind.label),
+                              selected: _listKind == kind,
+                              onSelected: _busy
+                                  ? null
+                                  : (_) => _selectList(kind),
+                            ),
+                        ],
+                      ),
+                    );
+                  }
+                  if (index == 2) return _listHeader();
+                  final itemIndex = index - 3;
                   if (itemIndex < _items.length) {
                     final item = _items[itemIndex];
                     return KeyedSubtree(
                       key: ValueKey(item.drama.id),
-                      child: _likedTile(item),
+                      child: _seriesTile(item),
                     );
                   }
                   if (_hasMore) {
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       child: OutlinedButton(
-                        onPressed: _loadingLikes || _busy || _sessionExpired
+                        onPressed: _loadingList || _busy || _sessionExpired
                             ? null
-                            : () => _loadLikes(refresh: false),
-                        child: const Text('加载更多点赞'),
+                            : () => _loadList(refresh: false),
+                        child: Text('加载更多${_listKind.label}'),
                       ),
                     );
                   }
-                  if (_likesLoaded && _items.isNotEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Center(child: Text('已显示全部可读取的点赞剧集')),
+                  if (_listLoaded && _items.isNotEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Center(
+                        child: Text('已显示全部可读取的${_listKind.label}剧集'),
+                      ),
                     );
                   }
                   return const SizedBox.shrink();
@@ -842,20 +900,36 @@ class _HongguoAccountScreenState extends State<HongguoAccountScreen>
   );
 }
 
-class _LikedSeries {
-  const _LikedSeries({
+class _AccountSeries {
+  const _AccountSeries({
     required this.drama,
     required this.playable,
     required this.note,
+    this.episodeIndex,
+    this.positionSeconds,
   });
 
   final Drama drama;
   final bool playable;
   final String note;
+  final int? episodeIndex;
+  final double? positionSeconds;
 
-  factory _LikedSeries.fromJson(Object? value) {
+  String get historyLabel {
+    final parts = <String>[];
+    if (episodeIndex != null) parts.add('手机观看到第 ${episodeIndex! + 1} 集');
+    if (positionSeconds != null) {
+      final seconds = positionSeconds!.floor();
+      parts.add(
+        '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}',
+      );
+    }
+    return parts.join(' · ');
+  }
+
+  factory _AccountSeries.fromJson(Object? value) {
     if (value is! Map || value['series'] is! Map) {
-      throw const FormatException('点赞剧集格式异常');
+      throw const FormatException('账号剧集格式异常');
     }
     final series = value['series'] as Map;
     final id = series['seriesId'];
@@ -864,9 +938,22 @@ class _LikedSeries {
         !RegExp(r'^[0-9]{1,30}$').hasMatch(id) ||
         title is! String ||
         title.trim().isEmpty) {
-      throw const FormatException('点赞剧集资料不完整');
+      throw const FormatException('账号剧集资料不完整');
     }
-    return _LikedSeries(
+    final history = value['history'];
+    final episodeIndex = history is Map ? history['episodeIndex'] : null;
+    final positionSeconds = history is Map ? history['positionSeconds'] : null;
+    return _AccountSeries(
+      episodeIndex:
+          episodeIndex is num && episodeIndex >= 0 && episodeIndex <= 10000
+          ? episodeIndex.toInt()
+          : null,
+      positionSeconds:
+          positionSeconds is num &&
+              positionSeconds.isFinite &&
+              positionSeconds >= 0
+          ? positionSeconds.toDouble()
+          : null,
       drama: Drama(
         id: 'hongguotv:$id',
         source: SourceSite.hongguotv.id,
@@ -879,5 +966,42 @@ class _LikedSeries {
       playable: value['playable'] == true,
       note: value['note'] is String ? value['note'] as String : '',
     );
+  }
+}
+
+enum _AccountListKind {
+  likes('likes', '点赞', '我的点赞'),
+  favorites('favorites', '收藏', '我的收藏'),
+  history('history', '观看历史', '账号观看历史');
+
+  const _AccountListKind(this.command, this.label, this.title);
+  final String command;
+  final String label;
+  final String title;
+}
+
+class _AccountListState {
+  bool loading = false;
+  bool loaded = false;
+  bool hasMore = false;
+  bool retryRefresh = true;
+  int nextOffset = 0;
+  int unsupportedCount = 0;
+  int? total;
+  String? error;
+  DateTime? syncedAt;
+  List<_AccountSeries> items = const [];
+
+  void reset() {
+    loading = false;
+    loaded = false;
+    hasMore = false;
+    retryRefresh = true;
+    nextOffset = 0;
+    unsupportedCount = 0;
+    total = null;
+    error = null;
+    syncedAt = null;
+    items = const [];
   }
 }

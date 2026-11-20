@@ -317,6 +317,10 @@ func NativeRequest(raw string) (result string) {
 		if errors.Is(err, errHongguoAccountSessionExpired) {
 			envelope["code"] = "hongguo_session_expired"
 		}
+		var libraryError *hongguoAccountLibraryError
+		if errors.As(err, &libraryError) {
+			envelope["code"] = "hongguo_" + libraryError.kind + "_unavailable"
+		}
 		if errors.Is(err, errNativeLocalFile) {
 			envelope["code"] = "local_media"
 		}
