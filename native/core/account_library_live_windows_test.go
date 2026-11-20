@@ -156,7 +156,12 @@ func TestLiveHongguoAccountLibraryReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(engine.downloads.close)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	probeTimeout := 3 * time.Minute
+	fullFavorites := os.Getenv("CHECK_FULL_HONGGUO_FAVORITES") == "true"
+	if fullFavorites {
+		probeTimeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
 	report := map[string]any{}
 	failed := false
@@ -255,6 +260,37 @@ func TestLiveHongguoAccountLibraryReadOnly(t *testing.T) {
 			failed = true
 		}
 		t.Logf("%s: rows=%d metadata requests=%d identity matches=%d", key, len(rows), len(samples), matches)
+	}
+	if fullFavorites {
+		pages := make([]map[string]any, 0, 2)
+		for _, offset := range []int{0, 20} {
+			entry := map[string]any{"requestedOffset": offset}
+			page, err := fetchHongguoAccountLibrary(ctx, credentials, device, "favorites", offset, engine.downloader.hongguoAccountLibraryMetadata)
+			if err != nil {
+				entry["error"] = "收藏分页读取失败"
+				entry["errorType"] = fmt.Sprintf("%T", err)
+				entry["errorReason"] = accountLibraryLiveErrorReason(err)
+				failed = true
+				pages = append(pages, entry)
+				t.Logf("favorites full page offset=%d: request was not verified", offset)
+				continue
+			}
+			items, valid := page["items"].([]map[string]any)
+			if !valid {
+				entry["error"] = "收藏分页归一化条目格式未确认"
+				failed = true
+			} else {
+				entry["normalizedCount"] = len(items)
+			}
+			for _, name := range []string{"offset", "nextOffset", "hasMore", "total", "retrievedCount", "unsupportedCount"} {
+				if value, exists := page[name]; exists {
+					entry[name] = value
+				}
+			}
+			pages = append(pages, entry)
+			t.Logf("favorites full page offset=%d: normalized=%d unsupported=%v next=%v total=%v", offset, len(items), page["unsupportedCount"], page["nextOffset"], page["total"])
+		}
+		report["favoritesFullPages"] = pages
 	}
 	if reportPath := os.Getenv("HONGGUO_LIBRARY_REPORT"); reportPath != "" {
 		if !filepath.IsAbs(reportPath) {
